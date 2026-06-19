@@ -81,3 +81,4 @@ pnpm dev
 ## License
 
 Proprietary — All rights reserved.
+# cbt-app
