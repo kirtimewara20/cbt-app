@@ -52,16 +52,24 @@ Should return: `{"status":"ok",...}`
 | **Root Directory** | `apps/web` |
 | **Framework** | Next.js (auto-detected) |
 
-#### 4. Environment variables:
+#### 4. **Important — enable monorepo support**
+
+After first import (or in **Project Settings → General**):
+
+- Turn **ON**: **"Include source files outside of the Root Directory in the Build Step"**
+
+Without this, Vercel cannot access `packages/shared` and the build fails.
+
+#### 5. Environment variables:
 
 | Key | Value |
 |-----|-------|
-| `NEXT_PUBLIC_API_URL` | `https://cbt-api.onrender.com/api/v1` |
-| `NEXT_PUBLIC_WS_URL` | `wss://cbt-api.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | `https://cbt-api-ktkr.onrender.com/api/v1` |
+| `NEXT_PUBLIC_WS_URL` | `wss://cbt-api-ktkr.onrender.com` |
 
-#### 5. Click **Deploy** (~3–5 min)
+#### 6. Click **Deploy** (~3–5 min)
 
-#### 6. Update API CORS on Render
+#### 7. Update API CORS on Render
 After Vercel gives you a URL (e.g. `https://cbt-app.vercel.app`):
 
 Render → **cbt-api** → **Environment** → set:
