@@ -1,18 +1,61 @@
 import { useAuthStore } from '@/stores/auth-store';
 import { isAdmin, isCandidate, normalizeRoles } from './roles';
 
-/** Same-origin /api/v1 is proxied to the NestJS API via next.config rewrites (fixes CORS on Vercel). */
+const PRODUCTION_API =
+  process.env.NEXT_PUBLIC_API_URL || 'https://cbt-api-ktkr.onrender.com/api/v1';
+
+/** Browser calls Render directly (CORS allows *.vercel.app). Server-side uses the Vercel proxy route. */
 function getApiUrl(): string {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') {
       return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
     }
-    // Deployed web app: always use Vercel proxy (avoids CORS + Render cold-start direct calls)
-    return '/api/v1';
+    return PRODUCTION_API.replace(/\/$/, '');
   }
-  const base = process.env.API_PROXY_URL || 'http://localhost:4000';
+  const base = process.env.API_PROXY_URL || 'https://cbt-api-ktkr.onrender.com';
   return `${base.replace(/\/$/, '')}/api/v1`;
+}
+
+function isHtmlResponse(raw: string): boolean {
+  const trimmed = raw.trimStart();
+  return trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html');
+}
+
+function formatNonJsonError(raw: string, ok: boolean): string {
+  if (ok) return 'Invalid response from server';
+  const lower = raw.toLowerCase();
+  if (lower.includes('vercel.com/login') || lower.includes('authentication required')) {
+    return 'This preview link requires Vercel login. Use https://cbt-app-jade.vercel.app instead.';
+  }
+  if (lower.includes('currently unavailable') || lower.includes('onrender.com')) {
+    return 'API is waking up (free tier). Wait 30–60 seconds, then try again.';
+  }
+  return 'API unavailable. Wait 30 seconds and try again.';
+}
+
+const COLD_START_RETRY_MS = 15_000;
+const COLD_START_MAX_ATTEMPTS = 3;
+
+async function fetchWithColdStartRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastResponse: Response | null = null;
+  for (let attempt = 0; attempt < COLD_START_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, init);
+      lastResponse = response;
+      if (response.ok) return response;
+      const raw = await response.clone().text();
+      const retryable =
+        response.status >= 502 ||
+        response.status === 503 ||
+        isHtmlResponse(raw);
+      if (!retryable || attempt === COLD_START_MAX_ATTEMPTS - 1) return response;
+    } catch {
+      if (attempt === COLD_START_MAX_ATTEMPTS - 1) throw new Error(formatNonJsonError('', false));
+    }
+    await new Promise((resolve) => setTimeout(resolve, COLD_START_RETRY_MS));
+  }
+  return lastResponse!;
 }
 
 const DEFAULT_TENANT = process.env.NEXT_PUBLIC_TENANT_ID || 'default';
@@ -73,14 +116,21 @@ export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): P
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
   headers['X-Tenant-ID'] = skipAuth ? getTenantId() : getAuthTenantId();
 
-  let response = await fetch(`${getApiUrl()}${endpoint}`, { ...fetchOptions, headers });
+  const requestUrl = `${getApiUrl()}${endpoint}`;
+  const useColdStartRetry =
+    typeof window !== 'undefined' &&
+    (endpoint.startsWith('/auth/') || endpoint.includes('/health'));
+
+  let response = useColdStartRetry
+    ? await fetchWithColdStartRetry(requestUrl, { ...fetchOptions, headers })
+    : await fetch(requestUrl, { ...fetchOptions, headers });
 
   if (response.status === 401 && !skipAuth && !endpoint.includes('/auth/refresh')) {
     if (!refreshPromise) refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null; });
     const newToken = await refreshPromise;
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;
-      response = await fetch(`${getApiUrl()}${endpoint}`, { ...fetchOptions, headers });
+      response = await fetch(requestUrl, { ...fetchOptions, headers });
     }
   }
 
@@ -89,11 +139,7 @@ export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): P
   try {
     data = raw ? JSON.parse(raw) : {};
   } catch {
-    throw new Error(
-      response.ok
-        ? 'Invalid response from server'
-        : 'API unavailable. Wait 30 seconds and try again.',
-    );
+    throw new Error(formatNonJsonError(raw, response.ok));
   }
   if (!response.ok) {
     throw new Error(formatApiError(data));

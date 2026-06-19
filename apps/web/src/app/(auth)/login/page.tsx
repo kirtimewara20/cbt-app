@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Wake Render free-tier API while the user reads the login form
+  useEffect(() => {
+    const api =
+      process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ||
+      'https://cbt-api-ktkr.onrender.com/api/v1';
+    fetch(`${api}/health`, { cache: 'no-store' }).catch(() => {});
+  }, []);
 
   function readCredentials(form: HTMLFormElement) {
     const formData = new FormData(form);

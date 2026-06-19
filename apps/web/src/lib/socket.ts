@@ -1,11 +1,10 @@
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/stores/auth-store';
-import { PRODUCTION_WS_ORIGIN } from './production-api';
 
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
   if (typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app')) {
-    return PRODUCTION_WS_ORIGIN;
+    return 'wss://cbt-api-ktkr.onrender.com';
   }
   return 'http://localhost:4000';
 }
