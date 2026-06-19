@@ -1,4 +1,6 @@
-# Render Blueprint — DB is Oregon-only on free tier; API + Web MUST match cbt-db region.
+# Render Blueprint — DB is Oregon-only on free tier; API + Web MUST be region: oregon
+#
+# If you have old cbt-api/cbt-web in Singapore: DELETE them first, then Manual Sync.
 
 databases:
   - name: cbt-db
@@ -9,7 +11,7 @@ databases:
 
 services:
   - type: web
-    name: cbt-api-oregon
+    name: cbt-api
     runtime: node
     plan: free
     region: oregon
@@ -38,10 +40,10 @@ services:
       - key: TOTP_WINDOW
         value: 1
       - key: APP_URL
-        value: https://cbt-web-oregon.onrender.com
+        value: https://cbt-web.onrender.com
 
   - type: web
-    name: cbt-web-oregon
+    name: cbt-web
     runtime: node
     plan: free
     region: oregon
@@ -53,6 +55,6 @@ services:
       - key: NODE_VERSION
         value: 20.18.0
       - key: NEXT_PUBLIC_API_URL
-        value: https://cbt-api-oregon.onrender.com/api/v1
+        value: https://cbt-api.onrender.com/api/v1
       - key: NEXT_PUBLIC_WS_URL
-        value: wss://cbt-api-oregon.onrender.com
+        value: wss://cbt-api.onrender.com

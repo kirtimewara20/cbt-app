@@ -41,8 +41,10 @@ Choose one path below. **Render (Option 1)** is easiest from Windows — no Dock
    ```
 
 6. **Open your app:**
-   - Web: `https://cbt-web.onrender.com`
-   - API docs: `https://cbt-api.onrender.com/api/docs`
+   - Web: `https://cbt-web-oregon.onrender.com`
+   - API docs: `https://cbt-api-oregon.onrender.com/api/docs`
+
+   > Free Postgres is **Oregon only**. Delete old Singapore `cbt-api` / `cbt-web` after Oregon services are Live.
 
 7. **Login:**
    - Admin: `admin@cbt-platform.com` / `Admin@123`
