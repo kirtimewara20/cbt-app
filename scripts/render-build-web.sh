@@ -9,8 +9,8 @@ NODE_ENV=development pnpm install --frozen-lockfile
 
 echo "==> Building Web..."
 export NODE_OPTIONS="--max-old-space-size=512"
-export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://cbt-api.onrender.com/api/v1}"
-export NEXT_PUBLIC_WS_URL="${NEXT_PUBLIC_WS_URL:-wss://cbt-api.onrender.com}"
+export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://cbt-api-oregon.onrender.com/api/v1}"
+export NEXT_PUBLIC_WS_URL="${NEXT_PUBLIC_WS_URL:-wss://cbt-api-oregon.onrender.com}"
 
 pnpm --filter @cbt/shared build
 pnpm --filter @cbt/web build

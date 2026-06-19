@@ -50,11 +50,11 @@ Choose one path below. **Render (Option 1)** is easiest from Windows — no Dock
 
 ### If login fails (CORS)
 
-In Render → **cbt-api** → **Environment**, confirm:
+In Render → **cbt-api-oregon** → **Environment**, confirm:
 ```
-APP_URL=https://cbt-web.onrender.com
+APP_URL=https://cbt-web-oregon.onrender.com
 ```
-Then **Manual Deploy** → Redeploy cbt-api.
+Then **Manual Deploy** → Redeploy cbt-api-oregon.
 
 ### Custom domain (optional)
 
