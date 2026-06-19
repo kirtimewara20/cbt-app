@@ -19,6 +19,9 @@ export function isOriginAllowed(origin: string | undefined): boolean {
   const allowed = getAllowedOrigins();
   if (allowed.has(origin)) return true;
 
+  // Vercel production / preview deployments
+  if (/^https:\/\/[\w-]+\.vercel\.app$/.test(origin)) return true;
+
   // Local dev over LAN: http://192.168.*.*:3002 or http://10.*.*.*:3002
   return /^http:\/\/(192\.168|10)\.\d{1,3}\.\d{1,3}:(3000|3002)$/.test(origin);
 }

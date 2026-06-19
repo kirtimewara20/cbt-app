@@ -1,7 +1,14 @@
 import { useAuthStore } from '@/stores/auth-store';
 import { isAdmin, isCandidate, normalizeRoles } from './roles';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+/** Same-origin /api/v1 is proxied to the NestJS API via next.config rewrites (fixes CORS on Vercel). */
+function getApiUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== 'undefined') return '/api/v1';
+  const base = process.env.API_PROXY_URL || 'http://localhost:4000';
+  return `${base.replace(/\/$/, '')}/api/v1`;
+}
+
 const DEFAULT_TENANT = process.env.NEXT_PUBLIC_TENANT_ID || 'default';
 
 function getTenantId(): string {
@@ -28,7 +35,7 @@ async function refreshAccessToken(): Promise<string | null> {
   if (!refreshToken) return null;
 
   try {
-    const res = await fetch(`${API_URL}/auth/refresh`, {
+    const res = await fetch(`${getApiUrl()}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': getAuthTenantId() },
       body: JSON.stringify({ refreshToken }),
@@ -60,14 +67,14 @@ export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): P
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
   headers['X-Tenant-ID'] = skipAuth ? getTenantId() : getAuthTenantId();
 
-  let response = await fetch(`${API_URL}${endpoint}`, { ...fetchOptions, headers });
+  let response = await fetch(`${getApiUrl()}${endpoint}`, { ...fetchOptions, headers });
 
   if (response.status === 401 && !skipAuth && !endpoint.includes('/auth/refresh')) {
     if (!refreshPromise) refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null; });
     const newToken = await refreshPromise;
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;
-      response = await fetch(`${API_URL}${endpoint}`, { ...fetchOptions, headers });
+      response = await fetch(`${getApiUrl()}${endpoint}`, { ...fetchOptions, headers });
     }
   }
 
@@ -231,7 +238,7 @@ export const usersApi = {
 export const resultsApi = {
   byExam: (token: string, examId: string) => apiFetch(`/results/exam/${examId}`, authHeaders(token)),
   exportCsv: async (token: string, examId: string) => {
-    const res = await fetch(`${API_URL}/results/exam/${examId}/export`, {
+    const res = await fetch(`${getApiUrl()}/results/exam/${examId}/export`, {
       headers: { Authorization: `Bearer ${token}`, 'X-Tenant-ID': getAuthTenantId() },
     });
     if (!res.ok) throw new Error('Export failed');

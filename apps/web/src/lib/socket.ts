@@ -1,7 +1,13 @@
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/stores/auth-store';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000';
+function getWsUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app')) {
+    return 'wss://cbt-api-ktkr.onrender.com';
+  }
+  return 'http://localhost:4000';
+}
 
 let proctoringSocket: Socket | null = null;
 
@@ -9,7 +15,7 @@ export function getProctoringSocket(): Socket {
   if (proctoringSocket?.connected) return proctoringSocket;
 
   const { accessToken, user } = useAuthStore.getState();
-  proctoringSocket = io(`${WS_URL}/proctoring`, {
+  proctoringSocket = io(`${getWsUrl()}/proctoring`, {
     auth: {
       token: accessToken,
       tenantId: user?.tenantId || 'default',

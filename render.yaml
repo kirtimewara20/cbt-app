@@ -45,4 +45,4 @@ services:
       - key: TOTP_WINDOW
         value: 1
       - key: APP_URL
-        value: https://cbt-web.vercel.app
+        value: https://cbt-app-jade.vercel.app
