@@ -1,6 +1,4 @@
-# Render Blueprint — DB is Oregon-only on free tier; API + Web MUST be region: oregon
-#
-# If you have old cbt-api/cbt-web in Singapore: DELETE them first, then Manual Sync.
+# Render Blueprint — all resources in Oregon (free Postgres region)
 
 databases:
   - name: cbt-db
@@ -15,8 +13,15 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: chmod +x scripts/render-build-api.sh && ./scripts/render-build-api.sh
-    startCommand: chmod +x scripts/render-start-api.sh && ./scripts/render-start-api.sh
+    buildCommand: >-
+      corepack enable &&
+      corepack prepare pnpm@9.15.4 --activate &&
+      export NODE_OPTIONS="--max-old-space-size=460" &&
+      NODE_ENV=development pnpm install --frozen-lockfile --ignore-scripts &&
+      pnpm --filter @cbt/shared build &&
+      pnpm --filter @cbt/api exec prisma generate &&
+      pnpm --filter @cbt/api build
+    startCommand: cd apps/api && npx prisma migrate deploy && node dist/main.js
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
@@ -47,8 +52,14 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: chmod +x scripts/render-build-web.sh && ./scripts/render-build-web.sh
-    startCommand: pnpm --filter @cbt/web start
+    buildCommand: >-
+      corepack enable &&
+      corepack prepare pnpm@9.15.4 --activate &&
+      export NODE_OPTIONS="--max-old-space-size=460" &&
+      NODE_ENV=development pnpm install --frozen-lockfile --ignore-scripts &&
+      pnpm --filter @cbt/shared build &&
+      pnpm --filter @cbt/web build
+    startCommand: cd apps/web && npx next start
     envVars:
       - key: NODE_ENV
         value: production
