@@ -3,8 +3,14 @@ import { isAdmin, isCandidate, normalizeRoles } from './roles';
 
 /** Same-origin /api/v1 is proxied to the NestJS API via next.config rewrites (fixes CORS on Vercel). */
 function getApiUrl(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-  if (typeof window !== 'undefined') return '/api/v1';
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+    }
+    // Deployed web app: always use Vercel proxy (avoids CORS + Render cold-start direct calls)
+    return '/api/v1';
+  }
   const base = process.env.API_PROXY_URL || 'http://localhost:4000';
   return `${base.replace(/\/$/, '')}/api/v1`;
 }

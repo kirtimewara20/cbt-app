@@ -1,7 +1,10 @@
 import type { NextConfig } from 'next';
 import path from 'path';
 
-const apiProxyTarget = process.env.API_PROXY_URL || 'http://localhost:4000';
+// VERCEL is set automatically on Vercel builds — avoid defaulting rewrites to localhost in production.
+const apiProxyTarget =
+  process.env.API_PROXY_URL ||
+  (process.env.VERCEL ? 'https://cbt-api-ktkr.onrender.com' : 'http://localhost:4000');
 
 const nextConfig: NextConfig = {
   transpilePackages: ['@cbt/shared'],
