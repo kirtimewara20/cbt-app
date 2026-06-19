@@ -84,11 +84,21 @@ export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): P
     }
   }
 
-  const data = await response.json();
+  const raw = await response.text();
+  let data: unknown;
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    throw new Error(
+      response.ok
+        ? 'Invalid response from server'
+        : 'API unavailable. Wait 30 seconds and try again.',
+    );
+  }
   if (!response.ok) {
     throw new Error(formatApiError(data));
   }
-  return data.data ?? data;
+  return (data as { data?: T }).data ?? (data as T);
 }
 
 function formatApiError(data: unknown): string {
