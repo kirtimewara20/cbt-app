@@ -1,11 +1,12 @@
-# Render Blueprint — deploy from GitHub (no Docker on your PC)
-# Docs: https://render.com/docs/blueprint-spec
+# Render Blueprint — deploy from GitHub
+# If deploy fails: check Render dashboard logs for cbt-api / cbt-web / cbt-db
 
 databases:
   - name: cbt-db
     plan: free
     databaseName: cbt_platform
     user: cbt_user
+    region: singapore
 
 services:
   - type: web
@@ -13,12 +14,14 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile && pnpm build:api
-    startCommand: pnpm start:api
+    buildCommand: chmod +x scripts/render-build-api.sh && ./scripts/render-build-api.sh
+    startCommand: chmod +x scripts/render-start-api.sh && ./scripts/render-start-api.sh
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: 20.18.0
       - key: DATABASE_URL
         fromDatabase:
           name: cbt-db
@@ -35,7 +38,6 @@ services:
         value: CBT Platform
       - key: TOTP_WINDOW
         value: 1
-      # Set after first deploy if CORS fails — use your cbt-web URL
       - key: APP_URL
         value: https://cbt-web.onrender.com
 
@@ -44,11 +46,13 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile && pnpm build:web
-    startCommand: pnpm start:web
+    buildCommand: chmod +x scripts/render-build-web.sh && ./scripts/render-build-web.sh
+    startCommand: cd apps/web && npx next start -p $PORT
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: 20.18.0
       - key: NEXT_PUBLIC_API_URL
         value: https://cbt-api.onrender.com/api/v1
       - key: NEXT_PUBLIC_WS_URL
