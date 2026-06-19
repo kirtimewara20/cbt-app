@@ -1,0 +1,287 @@
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException, forwardRef, Inject } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { ResultsService } from '../results/results.service';
+import { resolveCandidateId } from '../../common/utils/candidate.util';
+
+@Injectable()
+export class ExamEngineService {
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => ResultsService))
+    private resultsService: ResultsService,
+  ) {}
+
+  async startSessionByUser(
+    examId: string,
+    userId: string,
+    ipAddress: string,
+    deviceFingerprint: string,
+  ) {
+    const candidateId = await resolveCandidateId(this.prisma, userId);
+    return this.startSession(examId, candidateId, ipAddress, deviceFingerprint);
+  }
+
+  async startSession(examId: string, candidateId: string, ipAddress: string, deviceFingerprint: string) {
+    const existing = await this.prisma.examSession.findFirst({
+      where: { examId, candidateId, status: 'IN_PROGRESS' },
+    });
+    if (existing) {
+      return this.getSessionState(existing.id, candidateId);
+    }
+
+    const registration = await this.prisma.examRegistration.findUnique({
+      where: { examId_candidateId: { examId, candidateId } },
+    });
+    if (!registration) throw new BadRequestException('Not registered for this exam');
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        sections: {
+          include: {
+            questions: {
+              include: {
+                question: {
+                  include: { versions: { take: 1, orderBy: { versionNumber: 'desc' } } },
+                },
+              },
+            },
+          },
+          orderBy: { orderIndex: 'asc' },
+        },
+      },
+    });
+    if (!exam) throw new NotFoundException('Exam not found');
+    if (exam.status !== 'PUBLISHED' && exam.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Exam is not available');
+    }
+
+    const now = new Date();
+    if (now < exam.startTime) throw new BadRequestException('Exam has not started yet');
+    if (now > exam.endTime) throw new BadRequestException('Exam has ended');
+
+    const settings = (exam.settings || {}) as Record<string, unknown>;
+    const durationMinutes = (settings.durationMinutes as number) || 120;
+
+    const session = await this.prisma.examSession.create({
+      data: {
+        examId,
+        candidateId,
+        registrationId: registration.id,
+        status: 'IN_PROGRESS',
+        startedAt: now,
+        timeRemainingSeconds: durationMinutes * 60,
+        currentSectionId: exam.sections[0]?.id,
+        ipAddress,
+        deviceFingerprint,
+      },
+    });
+
+    let questionOrder = exam.sections.flatMap((s) => s.questions.map((q) => q.questionId));
+    if (settings.shuffleQuestions) {
+      questionOrder = this.shuffle(questionOrder);
+    }
+
+    await this.prisma.examSession.update({
+      where: { id: session.id },
+      data: { questionOrder },
+    });
+
+    return this.getSessionState(session.id, candidateId);
+  }
+
+  async assertSessionOwner(sessionId: string, userId: string) {
+    const candidateId = await resolveCandidateId(this.prisma, userId);
+    const session = await this.prisma.examSession.findUnique({ where: { id: sessionId } });
+    if (!session) throw new NotFoundException('Session not found');
+    if (session.candidateId !== candidateId) {
+      throw new ForbiddenException('Session does not belong to this candidate');
+    }
+    return { session, candidateId };
+  }
+
+  async getSessionState(sessionId: string, candidateId?: string) {
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        exam: true,
+        responses: true,
+      },
+    });
+    if (!session) throw new NotFoundException('Session not found');
+    if (candidateId && session.candidateId !== candidateId) {
+      throw new BadRequestException('Session does not belong to candidate');
+    }
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: session.examId },
+      include: {
+        sections: {
+          include: {
+            questions: {
+              include: {
+                question: {
+                  include: { versions: { take: 1, orderBy: { versionNumber: 'desc' } } },
+                },
+              },
+            },
+          },
+          orderBy: { orderIndex: 'asc' },
+        },
+      },
+    });
+
+    const timeRemaining = await this.calculateTimeRemaining(session);
+
+    const questions = (session.questionOrder as string[] || []).map((qId) => {
+      for (const section of exam?.sections || []) {
+        const eq = section.questions.find((q) => q.questionId === qId);
+        if (eq) {
+          const version = eq.question.versions[0];
+          return {
+            id: eq.questionId,
+            sectionId: section.id,
+            type: eq.question.type,
+            title: eq.question.title,
+            content: version?.content,
+            options: version?.options,
+            marks: eq.marks ?? version?.marks,
+            negativeMarks: eq.negativeMarks ?? version?.negativeMarks,
+          };
+        }
+      }
+      return null;
+    }).filter(Boolean);
+
+    return {
+      sessionId: session.id,
+      examId: session.examId,
+      status: session.status,
+      timeRemainingSeconds: timeRemaining,
+      exam: {
+        id: exam?.id,
+        title: exam?.title,
+        settings: exam?.settings,
+        securityPolicy: exam?.securityPolicy,
+      },
+      riskScore: session.riskScore,
+      questions,
+      responses: session.responses.map((r) => ({
+        questionId: r.questionId,
+        answer: r.answer,
+        markedForReview: r.markedForReview,
+      })),
+    };
+  }
+
+  async saveAnswer(
+    sessionId: string,
+    userId: string,
+    questionId: string,
+    answer: unknown,
+    timeSpentSeconds: number,
+    markedForReview = false,
+  ) {
+    const { session } = await this.assertSessionOwner(sessionId, userId);
+    if (session.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Session is not active');
+    }
+
+    return this.prisma.sessionResponse.upsert({
+      where: { sessionId_questionId: { sessionId, questionId } },
+      create: {
+        sessionId,
+        questionId,
+        answer: answer as never,
+        timeSpentSeconds,
+        markedForReview,
+        answeredAt: new Date(),
+      },
+      update: {
+        answer: answer as never,
+        timeSpentSeconds,
+        markedForReview,
+        answeredAt: new Date(),
+      },
+    });
+  }
+
+  async markForReview(sessionId: string, userId: string, questionId: string, marked: boolean) {
+    await this.assertSessionOwner(sessionId, userId);
+    const response = await this.prisma.sessionResponse.findUnique({
+      where: { sessionId_questionId: { sessionId, questionId } },
+    });
+    if (response) {
+      return this.prisma.sessionResponse.update({
+        where: { id: response.id },
+        data: { markedForReview: marked },
+      });
+    }
+    return this.prisma.sessionResponse.create({
+      data: { sessionId, questionId, markedForReview: marked, answer: Prisma.DbNull },
+    });
+  }
+
+  async submitSession(sessionId: string, userId: string) {
+    const { session } = await this.assertSessionOwner(sessionId, userId);
+    if (session.status === 'SUBMITTED' || session.status === 'AUTO_SUBMITTED') {
+      throw new BadRequestException('Already submitted');
+    }
+
+    const updated = await this.prisma.examSession.update({
+      where: { id: sessionId },
+      data: { status: 'SUBMITTED', submittedAt: new Date(), timeRemainingSeconds: 0 },
+    });
+
+    const result = await this.resultsService.evaluateSession(sessionId);
+    return { session: updated, result };
+  }
+
+  async heartbeat(sessionId: string, userId: string) {
+    const { session } = await this.assertSessionOwner(sessionId, userId);
+    if (session.status !== 'IN_PROGRESS') {
+      return { alive: false, autoSubmitted: false };
+    }
+
+    const timeRemaining = await this.calculateTimeRemaining(session);
+    await this.prisma.examSession.update({
+      where: { id: sessionId },
+      data: { timeRemainingSeconds: timeRemaining },
+    });
+
+    if (timeRemaining <= 0) {
+      if (session.status === 'IN_PROGRESS') {
+        const { result } = await this.submitSession(sessionId, userId);
+        return { alive: false, autoSubmitted: true, timeRemainingSeconds: 0, result };
+      }
+      const result = await this.prisma.examResult.findUnique({ where: { sessionId } });
+      return { alive: false, autoSubmitted: true, timeRemainingSeconds: 0, result };
+    }
+
+    return { alive: true, autoSubmitted: false, timeRemainingSeconds: timeRemaining };
+  }
+
+  private async calculateTimeRemaining(session: {
+    startedAt: Date | null;
+    timeRemainingSeconds: number | null;
+    examId: string;
+  }) {
+    const exam = await this.prisma.exam.findUnique({ where: { id: session.examId } });
+    const settings = (exam?.settings || {}) as Record<string, unknown>;
+    const durationMinutes = (settings.durationMinutes as number) || 120;
+    const totalSeconds = durationMinutes * 60;
+    if (!session.startedAt) return session.timeRemainingSeconds ?? totalSeconds;
+    const elapsed = Math.floor((Date.now() - session.startedAt.getTime()) / 1000);
+    return Math.max(0, totalSeconds - elapsed);
+  }
+
+  private shuffle<T>(array: T[]): T[] {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+}

@@ -1,0 +1,449 @@
+'use client';
+
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { examsApi, resultsApi, candidatesApi } from '@/lib/api';
+import { useRequireCandidate } from '@/hooks/use-auth';
+import { useAuthStore } from '@/stores/auth-store';
+import { isAdmin, normalizeRoles } from '@/lib/roles';
+import { Logo } from '@/components/layout/logo';
+import { StatCard } from '@/components/layout/stat-card';
+import { EmptyState } from '@/components/layout/data-table';
+import { AdmitCardDialog, type AdmitCard } from '@/components/candidate/admit-card-dialog';
+import { getExamStatus, formatCountdown } from '@/lib/exam-status';
+import {
+  LogOut, Play, Clock, Award, FileText, Moon, Sun, Shield, Download, IdCard,
+  Search, CheckCircle2, AlertCircle, BookOpen, Wifi, Monitor, User,
+} from 'lucide-react';
+import { useTheme } from 'next-themes';
+import { TableSkeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
+
+type ExamRegistration = {
+  id: string;
+  examId: string;
+  exam: {
+    title: string; code: string; status: string;
+    startTime: string; endTime: string;
+    settings?: { durationMinutes: number };
+  };
+  sessions?: { status: string }[];
+};
+
+type CandidateDashboard = {
+  profile: {
+    registrationNumber: string;
+    kycStatus: string;
+    email: string;
+    fullName: string;
+  };
+  stats: {
+    totalExams: number;
+    submittedExams: number;
+    inProgressExams: number;
+    publishedResults: number;
+    averageScore: number | null;
+  };
+};
+
+type Tab = 'exams' | 'results';
+
+const KYC_VARIANTS: Record<string, 'success' | 'warning' | 'destructive' | 'outline'> = {
+  VERIFIED: 'success',
+  PENDING: 'warning',
+  REJECTED: 'destructive',
+  NOT_SUBMITTED: 'outline',
+};
+
+const READINESS_ITEMS = [
+  { icon: Wifi, label: 'Stable internet connection' },
+  { icon: Monitor, label: 'Working webcam & microphone' },
+  { icon: User, label: 'Valid photo ID ready' },
+  { icon: BookOpen, label: 'Quiet, well-lit environment' },
+];
+
+export default function MyExamsPage() {
+  const router = useRouter();
+  const { accessToken, ready } = useRequireCandidate();
+  const { user, logout } = useAuthStore();
+  const { theme, setTheme } = useTheme();
+  const [admitCard, setAdmitCard] = useState<AdmitCard | null>(null);
+  const [loadingAdmit, setLoadingAdmit] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<Tab>('exams');
+  const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
+
+  const { data: exams, isLoading: examsLoading } = useQuery({
+    queryKey: ['my-exams'],
+    queryFn: () => examsApi.myExams(accessToken!),
+    enabled: !!accessToken,
+  });
+
+  const { data: results } = useQuery({
+    queryKey: ['my-results'],
+    queryFn: () => resultsApi.my(accessToken!),
+    enabled: !!accessToken,
+  });
+
+  const { data: dashboard } = useQuery({
+    queryKey: ['candidate-dashboard'],
+    queryFn: () => candidatesApi.dashboard(accessToken!) as Promise<CandidateDashboard>,
+    enabled: !!accessToken,
+  });
+
+  const examList = (exams as ExamRegistration[]) || [];
+  const resultList = (results as { items?: {
+    id: string; totalScore: number; maxScore: number; percentage: number;
+    published: boolean; exam: { title: string; code: string };
+  }[] })?.items || [];
+
+  const filteredExams = examList.filter((reg) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return reg.exam.title.toLowerCase().includes(q) || reg.exam.code.toLowerCase().includes(q);
+  });
+
+  const stats = dashboard?.stats;
+  const profile = dashboard?.profile;
+
+  async function showAdmitCard(examId: string) {
+    if (!accessToken) return;
+    setLoadingAdmit(examId);
+    try {
+      const card = await candidatesApi.admitCard(accessToken, examId) as AdmitCard;
+      setAdmitCard(card);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingAdmit(null);
+    }
+  }
+
+  async function downloadCertificate(resultId: string) {
+    if (!accessToken) return;
+    try {
+      const cert = await resultsApi.certificate(accessToken, resultId);
+      const blob = new Blob([JSON.stringify(cert, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `certificate-${resultId.slice(0, 8)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!ready) return null;
+  if (user && isAdmin(normalizeRoles(user.roles))) return null;
+
+  const greeting = new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening';
+
+  return (
+    <div className="min-h-screen mesh-bg">
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-card/60 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+          <Logo />
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            <div className="flex items-center gap-2.5 rounded-xl border border-border/60 bg-muted/30 py-1.5 pl-1.5 pr-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg gradient-primary text-xs font-bold text-white">
+                {initials}
+              </div>
+              <div className="hidden sm:block">
+                <p className="text-sm font-semibold leading-none">{user?.firstName}</p>
+                {profile && (
+                  <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{profile.registrationNumber}</p>
+                )}
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={async () => { await logout(); window.location.href = '/login'; }}>
+              <LogOut className="mr-2 h-4 w-4" /> Logout
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl space-y-8 px-6 py-10 animate-fade-in">
+        <div className="hero-banner">
+          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-primary">Good {greeting}, {user?.firstName}</p>
+              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Candidate Portal</h1>
+              <p className="max-w-lg text-muted-foreground">
+                View assigned exams, download admit cards, and access your published results.
+              </p>
+            </div>
+            {profile && (
+              <Card className="surface-card shrink-0 border-primary/20 lg:w-72">
+                <CardContent className="space-y-3 p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Profile</p>
+                    <Badge variant={KYC_VARIANTS[profile.kycStatus] ?? 'outline'}>
+                      KYC {profile.kycStatus.replace('_', ' ')}
+                    </Badge>
+                  </div>
+                  <p className="font-bold">{profile.fullName}</p>
+                  <p className="text-sm text-muted-foreground">{profile.email}</p>
+                  <p className="font-mono text-xs font-semibold text-primary">{profile.registrationNumber}</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard title="Assigned Exams" value={stats?.totalExams ?? examList.length} icon={FileText} accent="blue" />
+          <StatCard
+            title="In Progress"
+            value={stats?.inProgressExams ?? 0}
+            icon={Clock}
+            accent="amber"
+            trend={stats?.inProgressExams ? 'Resume now' : undefined}
+            trendUp={!!stats?.inProgressExams}
+          />
+          <StatCard title="Submitted" value={stats?.submittedExams ?? 0} icon={CheckCircle2} accent="green" />
+          <StatCard
+            title="Avg. Score"
+            value={stats?.averageScore != null ? `${stats.averageScore.toFixed(1)}%` : '—'}
+            icon={Award}
+            accent="violet"
+            trend={stats?.publishedResults ? `${stats.publishedResults} results` : undefined}
+          />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="space-y-6 lg:col-span-2">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex gap-1 rounded-xl border border-border/60 bg-muted/30 p-1">
+                {(['exams', 'results'] as Tab[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTab(t)}
+                    className={cn(
+                      'rounded-lg px-4 py-2 text-sm font-semibold capitalize transition-all',
+                      tab === t ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {t === 'exams' ? `My Exams (${examList.length})` : `Results (${resultList.length})`}
+                  </button>
+                ))}
+              </div>
+              {tab === 'exams' && (
+                <div className="relative w-full sm:w-56">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search exams..."
+                    className="pl-9"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {tab === 'exams' && (
+              <section className="space-y-3">
+                {examsLoading ? <TableSkeleton rows={3} cols={1} /> : (
+                  <>
+                    {filteredExams.map((reg) => {
+                      const status = getExamStatus(reg);
+                      const countdown = status.phase === 'upcoming'
+                        ? formatCountdown(new Date(reg.exam.startTime).getTime())
+                        : null;
+                      return (
+                        <Card
+                          key={reg.id}
+                          className={cn(
+                            'surface-card group',
+                            status.phase === 'available' && 'border-emerald-500/30 ring-1 ring-emerald-500/10',
+                            status.phase === 'in_progress' && 'border-amber-500/30 ring-1 ring-amber-500/10',
+                          )}
+                        >
+                          <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-start gap-4">
+                              <div className={cn(
+                                'flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl transition-transform group-hover:scale-105',
+                                status.phase === 'available' ? 'bg-emerald-500/10 text-emerald-600' :
+                                status.phase === 'in_progress' ? 'bg-amber-500/10 text-amber-600' :
+                                'bg-primary/10 text-primary',
+                              )}>
+                                <FileText className="h-6 w-6" />
+                              </div>
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h3 className="font-bold">{reg.exam.title}</h3>
+                                  <Badge variant={status.variant}>{status.label}</Badge>
+                                  {countdown && (
+                                    <Badge variant="outline" className="font-mono text-xs">
+                                      Opens in {countdown}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-sm text-muted-foreground">{reg.exam.code}</p>
+                                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1.5">
+                                    <Clock className="h-3 w-3" />
+                                    {reg.exam.settings?.durationMinutes ?? 30} min
+                                  </span>
+                                  <span>
+                                    {new Date(reg.exam.startTime).toLocaleDateString(undefined, {
+                                      weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                                    })}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => showAdmitCard(reg.examId)}
+                                disabled={loadingAdmit === reg.examId}
+                              >
+                                <IdCard className="mr-2 h-4 w-4" />
+                                {loadingAdmit === reg.examId ? 'Loading...' : 'Admit Card'}
+                              </Button>
+                              <Button
+                                onClick={() => router.push(`/exam/instructions/${reg.examId}`)}
+                                disabled={status.actionDisabled}
+                                variant={status.actionDisabled ? 'secondary' : 'default'}
+                                className={status.phase === 'available' || status.phase === 'in_progress' ? 'gradient-primary border-0' : ''}
+                              >
+                                <Play className="mr-2 h-4 w-4" /> {status.actionLabel}
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                    {!filteredExams.length && (
+                      <Card className="surface-card">
+                        <EmptyState
+                          icon={search ? Search : FileText}
+                          title={search ? 'No exams match your search' : 'No exams assigned yet'}
+                          description={search ? 'Try a different search term.' : 'Contact your administrator for exam access.'}
+                        />
+                      </Card>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
+            {tab === 'results' && (
+              <section className="space-y-3">
+                {resultList.map((r) => {
+                  const pct = Math.min(100, r.percentage);
+                  const passed = pct >= 40;
+                  return (
+                    <Card key={r.id} className="surface-card">
+                      <CardContent className="p-6">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className={cn(
+                              'flex h-12 w-12 items-center justify-center rounded-2xl',
+                              passed ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600',
+                            )}>
+                              <Award className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <p className="font-bold">{r.exam.title}</p>
+                              <p className="text-sm text-muted-foreground">{r.exam.code}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <p className="text-2xl font-bold tabular-nums text-primary">
+                                {r.totalScore}<span className="text-base font-normal text-muted-foreground">/{r.maxScore}</span>
+                              </p>
+                              <p className="text-sm font-semibold text-muted-foreground">{r.percentage.toFixed(1)}%</p>
+                            </div>
+                            <Button variant="outline" size="sm" onClick={() => downloadCertificate(r.id)}>
+                              <Download className="mr-2 h-3.5 w-3.5" /> Certificate
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="mt-4 space-y-1.5">
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Score</span>
+                            <span className={passed ? 'text-emerald-600 font-semibold' : 'text-red-600 font-semibold'}>
+                              {passed ? 'Passed' : 'Below cutoff'}
+                            </span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className={cn('h-full rounded-full transition-all', passed ? 'bg-emerald-500' : 'bg-red-500')}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+                {!resultList.length && (
+                  <Card className="surface-card">
+                    <EmptyState
+                      icon={Award}
+                      title="No results published yet"
+                      description="Your exam scores will appear here once results are published by the administrator."
+                    />
+                  </Card>
+                )}
+              </section>
+            )}
+          </div>
+
+          <aside className="space-y-4">
+            <Card className="surface-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base font-bold">
+                  <AlertCircle className="h-4 w-4 text-primary" />
+                  Exam Readiness
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {READINESS_ITEMS.map(({ icon: Icon, label }) => (
+                  <div key={label} className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-2.5 text-sm">
+                    <Icon className="h-4 w-4 shrink-0 text-primary" />
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="surface-card border-primary/20">
+              <CardContent className="space-y-2 p-5">
+                <div className="flex items-center gap-2 text-sm font-bold">
+                  <Shield className="h-4 w-4 text-primary" />
+                  Proctored Environment
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  All examinations are monitored via webcam and screen activity. Tab switching,
+                  copy-paste, and fullscreen exit may be flagged as violations.
+                </p>
+              </CardContent>
+            </Card>
+          </aside>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 pb-4 text-xs text-muted-foreground">
+          <Shield className="h-3.5 w-3.5" />
+          Secured by CBT Platform · Enterprise examination suite
+        </div>
+      </main>
+
+      <AdmitCardDialog card={admitCard} onClose={() => setAdmitCard(null)} />
+    </div>
+  );
+}

@@ -1,0 +1,95 @@
+import { Controller, Get, Post, Delete, Param, Query, Body, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ExamsService } from './exams.service';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Permission } from '@cbt/shared';
+
+@ApiTags('Exams')
+@Controller('exams')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@ApiBearerAuth()
+export class ExamsController {
+  constructor(private examsService: ExamsService) {}
+
+  @Post()
+  @RequirePermissions(Permission.EXAM_CREATE)
+  create(
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('sub') userId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.examsService.create(tenantId, userId, body as never);
+  }
+
+  @Get('my/available')
+  @RequirePermissions(Permission.EXAM_TAKE)
+  @ApiOperation({ summary: 'Get exams available for candidate' })
+  myExams(@CurrentUser('sub') userId: string) {
+    return this.examsService.getAvailableForCandidate(userId);
+  }
+
+  @Get()
+  @RequirePermissions(Permission.EXAM_READ)
+  findAll(
+    @CurrentUser('tenantId') tenantId: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.examsService.findAll(tenantId, page, limit);
+  }
+
+  @Get(':id')
+  @RequirePermissions(Permission.EXAM_READ)
+  findOne(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.examsService.findOne(id, tenantId);
+  }
+
+  @Post(':id/questions')
+  @RequirePermissions(Permission.EXAM_UPDATE)
+  @ApiOperation({ summary: 'Add questions to exam section' })
+  addQuestions(
+    @Param('id') examId: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser('sub') userId: string,
+    @Body() body: { sectionId: string; questionIds: string[] },
+  ) {
+    return this.examsService.addQuestions(examId, tenantId, userId, body.sectionId, body.questionIds);
+  }
+
+  @Post(':id/publish')
+  @RequirePermissions(Permission.EXAM_PUBLISH)
+  publish(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.examsService.publish(id, tenantId);
+  }
+
+  @Post(':id/candidates')
+  @RequirePermissions(Permission.EXAM_ASSIGN_CANDIDATES)
+  assignCandidates(
+    @Param('id') examId: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @Body('candidateIds') candidateIds: string[],
+  ) {
+    return this.examsService.assignCandidates(examId, tenantId, candidateIds);
+  }
+
+  @Delete(':id/questions/:questionId')
+  @RequirePermissions(Permission.EXAM_UPDATE)
+  @ApiOperation({ summary: 'Remove question from draft exam' })
+  removeQuestion(
+    @Param('id') examId: string,
+    @Param('questionId') questionId: string,
+    @CurrentUser('tenantId') tenantId: string,
+  ) {
+    return this.examsService.removeQuestion(examId, tenantId, questionId);
+  }
+
+  @Delete(':id')
+  @RequirePermissions(Permission.EXAM_DELETE)
+  @ApiOperation({ summary: 'Delete exam permanently' })
+  remove(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
+    return this.examsService.remove(id, tenantId);
+  }
+}
