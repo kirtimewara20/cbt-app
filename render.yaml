@@ -1,19 +1,18 @@
-# Render Blueprint — deploy from GitHub
-# If deploy fails: check Render dashboard logs for cbt-api / cbt-web / cbt-db
+# Render Blueprint — all resources must be in the SAME region as cbt-db (Oregon for free Postgres)
 
 databases:
   - name: cbt-db
     plan: free
     databaseName: cbt_platform
     user: cbt_user
-    region: singapore
+    region: oregon
 
 services:
   - type: web
     name: cbt-api
     runtime: node
     plan: free
-    region: singapore
+    region: oregon
     buildCommand: chmod +x scripts/render-build-api.sh && ./scripts/render-build-api.sh
     startCommand: chmod +x scripts/render-start-api.sh && ./scripts/render-start-api.sh
     healthCheckPath: /api/v1/health
@@ -45,9 +44,9 @@ services:
     name: cbt-web
     runtime: node
     plan: free
-    region: singapore
+    region: oregon
     buildCommand: chmod +x scripts/render-build-web.sh && ./scripts/render-build-web.sh
-    startCommand: cd apps/web && npx next start -p $PORT
+    startCommand: pnpm --filter @cbt/web start
     envVars:
       - key: NODE_ENV
         value: production
