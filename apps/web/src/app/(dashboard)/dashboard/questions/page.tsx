@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { questionsApi } from '@/lib/api';
 import { useRequireAuth } from '@/hooks/use-auth';
+import { useDebounce } from '@/hooks/use-debounce';
 import { usePermissions } from '@/hooks/use-permissions';
 import { Permission } from '@cbt/shared';
 import { toast } from '@/hooks/use-toast';
@@ -28,6 +29,7 @@ export default function QuestionsPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [form, setForm] = useState({
     title: '', type: 'MCQ', difficulty: 'MEDIUM',
@@ -35,10 +37,11 @@ export default function QuestionsPage() {
     correctAnswer: 'a', correctAnswers: [] as string[],
   });
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['questions', search],
-    queryFn: () => questionsApi.list(accessToken!, 1, { search }),
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['questions', debouncedSearch],
+    queryFn: () => questionsApi.list(accessToken!, 1, { search: debouncedSearch }),
     enabled: !!accessToken,
+    placeholderData: (prev) => prev,
   });
 
   const createMutation = useMutation({
@@ -59,11 +62,24 @@ export default function QuestionsPage() {
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => questionsApi.approve(accessToken!, id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['questions'] });
-      toast({ title: 'Question approved', variant: 'success' });
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['questions', debouncedSearch] });
+      const previous = queryClient.getQueryData<{ items: { id: string; status: string }[] }>(['questions', debouncedSearch]);
+      queryClient.setQueryData(['questions', debouncedSearch], (old: typeof previous) => {
+        if (!old) return old;
+        return {
+          ...old,
+          items: old.items.map((q) => (q.id === id ? { ...q, status: 'APPROVED' } : q)),
+        };
+      });
+      return { previous };
     },
-    onError: (e: Error) => toast({ title: 'Failed', description: e.message, variant: 'destructive' }),
+    onSuccess: () => toast({ title: 'Question approved', variant: 'success' }),
+    onError: (e: Error, _, context) => {
+      if (context?.previous) queryClient.setQueryData(['questions', debouncedSearch], context.previous);
+      toast({ title: 'Failed', description: e.message, variant: 'destructive' });
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['questions'] }),
   });
 
   const deleteMutation = useMutation({
@@ -188,8 +204,12 @@ export default function QuestionsPage() {
             ))}
           </tbody>
         </table>
-        {!items.length && <EmptyState icon={HelpCircle} title="No questions found" description="Add questions manually or generate with AI." />}
+        {!items.length && <EmptyState icon={HelpCircle} title="No questions found" description={debouncedSearch ? 'Try a different search term.' : 'Add questions manually or generate with AI.'} />}
       </DataTable>
+
+      {isFetching && !isLoading && (
+        <p className="text-center text-xs text-muted-foreground">Updating...</p>
+      )}
 
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent>

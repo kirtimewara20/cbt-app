@@ -34,6 +34,8 @@ export default function DashboardPage() {
     queryKey: ['dashboard'],
     queryFn: () => dashboardApi.stats(accessToken!),
     enabled: !!accessToken,
+    refetchInterval: 20000,
+    refetchIntervalInBackground: false,
   });
 
   const stats = (data as { stats?: Record<string, number> })?.stats;

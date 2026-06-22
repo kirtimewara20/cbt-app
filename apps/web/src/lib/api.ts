@@ -375,6 +375,7 @@ export const analyticsApi = {
 };
 
 export const aiApi = {
+  status: (token: string) => apiFetch('/ai/status', authHeaders(token)),
   generateQuestions: (token: string, body: { topic: string; count?: number; difficulty?: string; type?: string }) =>
     apiFetch('/ai/questions/generate', { method: 'POST', body: JSON.stringify(body), ...authHeaders(token) }),
   examInsights: (token: string, examId: string) =>

@@ -22,11 +22,13 @@ export default function ResultsPage() {
     enabled: !!accessToken,
   });
 
-  const { data: results, isLoading } = useQuery({
+  const { data: results, isLoading, isError, error } = useQuery({
     queryKey: ['results', selectedExam],
     queryFn: () => resultsApi.byExam(accessToken!, selectedExam),
     enabled: !!accessToken && !!selectedExam,
   });
+
+  const unpublishedCount = (results?.items || []).filter((r: { published: boolean }) => !r.published).length;
 
   const rankMutation = useMutation({
     mutationFn: (examId: string) => resultsApi.rank(accessToken!, examId),
@@ -76,8 +78,19 @@ export default function ResultsPage() {
       </PageHeader>
 
       {isLoading && selectedExam && <div>Loading results...</div>}
+      {isError && selectedExam && (
+        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          Failed to load results: {error instanceof Error ? error.message : 'Unknown error'}
+        </p>
+      )}
 
-      {selectedExam && (
+      {selectedExam && !isLoading && !isError && unpublishedCount > 0 && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+          {unpublishedCount} result(s) are in draft. Click <strong>Publish</strong> so candidates can see them under My Exams → Results.
+        </p>
+      )}
+
+      {selectedExam && !isLoading && !isError && (
         <DataTable>
           <table className="w-full">
             <DataTableHeader>

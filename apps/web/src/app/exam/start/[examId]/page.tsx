@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,12 +10,13 @@ import {
 } from '@/components/ui/dialog';
 import { examSessionApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
+import { useExamSocket } from '@/hooks/use-exam-socket';
 import { useExamSecurity } from '@/hooks/use-exam-security';
 import { useCameraProctoring } from '@/hooks/use-camera-proctoring';
 import { CameraPreview } from '@/components/proctoring/camera-preview';
 import { QuestionInput } from '@/components/exam/question-input';
 import type { ExamSecurityPolicy } from '@cbt/shared';
-import { AlertTriangle, Shield } from 'lucide-react';
+import { AlertTriangle, Shield, Wifi, WifiOff, Check, Loader2 } from 'lucide-react';
 
 interface Question {
   id: string;
@@ -50,6 +51,10 @@ export default function ExamStartPage() {
   const [error, setError] = useState('');
   const [securityReady, setSecurityReady] = useState(false);
   const [fullscreenError, setFullscreenError] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const saveStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const examSocket = useExamSocket(session?.sessionId ?? null, !!session && !done);
 
   const securityPolicy = (session?.exam?.securityPolicy ?? { fullscreen: true, blockCopyPaste: true, blockRightClick: true, proctoringEnabled: true }) as ExamSecurityPolicy;
   const proctoringEnabled = securityPolicy.proctoringEnabled !== false;
@@ -94,13 +99,44 @@ export default function ExamStartPage() {
   const saveAnswer = useCallback(async (questionId: string, value: string | string[]) => {
     if (!session || !accessToken) return;
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
-    await examSessionApi.saveAnswer(accessToken, session.sessionId, {
+    setSaveStatus('saving');
+    const payload = {
+      sessionId: session.sessionId,
       questionId,
       answer: { value },
       timeSpentSeconds: 5,
       markedForReview: review[questionId] || false,
-    });
-  }, [session, accessToken, review]);
+    };
+    try {
+      if (examSocket.connected) {
+        await examSocket.saveAnswer(payload);
+      } else {
+        await examSessionApi.saveAnswer(accessToken, session.sessionId, {
+          questionId,
+          answer: { value },
+          timeSpentSeconds: 5,
+          markedForReview: review[questionId] || false,
+        });
+      }
+      setSaveStatus('saved');
+      if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
+      saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch {
+      try {
+        await examSessionApi.saveAnswer(accessToken, session.sessionId, {
+          questionId,
+          answer: { value },
+          timeSpentSeconds: 5,
+          markedForReview: review[questionId] || false,
+        });
+        setSaveStatus('saved');
+        if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
+        saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch {
+        setSaveStatus('error');
+      }
+    }
+  }, [session, accessToken, review, examSocket]);
 
   const finishExam = useCallback((result: { totalScore: number; maxScore: number; percentage: number }) => {
     setResult(result);
@@ -127,11 +163,13 @@ export default function ExamStartPage() {
     const interval = setInterval(async () => {
       if (!accessToken) return;
       try {
-        const hb = await examSessionApi.heartbeat(accessToken, session.sessionId) as {
-          timeRemainingSeconds: number;
-          autoSubmitted: boolean;
-          result?: { totalScore: number; maxScore: number; percentage: number };
-        };
+        const hb = examSocket.connected
+          ? await examSocket.heartbeat(session.sessionId)
+          : await examSessionApi.heartbeat(accessToken, session.sessionId) as {
+              timeRemainingSeconds: number;
+              autoSubmitted: boolean;
+              result?: { totalScore: number; maxScore: number; percentage: number };
+            };
         setTimeLeft(hb.timeRemainingSeconds);
         if (hb.autoSubmitted && hb.result) {
           finishExam(hb.result);
@@ -141,7 +179,7 @@ export default function ExamStartPage() {
       }
     }, 10000);
     return () => clearInterval(interval);
-  }, [session, accessToken, done, finishExam]);
+  }, [session, accessToken, done, finishExam, examSocket]);
 
   useEffect(() => {
     if (done || !session) return;
@@ -230,6 +268,20 @@ export default function ExamStartPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {examSocket.connected ? (
+            <Badge variant="outline" className="gap-1 text-emerald-600"><Wifi className="h-3 w-3" /> Live</Badge>
+          ) : (
+            <Badge variant="outline" className="gap-1 text-muted-foreground"><WifiOff className="h-3 w-3" /> REST</Badge>
+          )}
+          {saveStatus === 'saving' && (
+            <Badge variant="secondary" className="gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Saving</Badge>
+          )}
+          {saveStatus === 'saved' && (
+            <Badge variant="success" className="gap-1"><Check className="h-3 w-3" /> Saved</Badge>
+          )}
+          {saveStatus === 'error' && (
+            <Badge variant="destructive" className="gap-1">Save failed</Badge>
+          )}
           {violations > 0 && (
             <Badge variant="destructive" className="gap-1">
               <AlertTriangle className="h-3 w-3" /> {violations} violations

@@ -15,6 +15,9 @@ import { Logo } from '@/components/layout/logo';
 import { StatCard } from '@/components/layout/stat-card';
 import { EmptyState } from '@/components/layout/data-table';
 import { AdmitCardDialog, type AdmitCard } from '@/components/candidate/admit-card-dialog';
+import { CertificateDialog } from '@/components/candidate/certificate-dialog';
+import type { CertificateData } from '@/lib/certificate';
+import { toast } from '@/hooks/use-toast';
 import { getExamStatus, formatCountdown } from '@/lib/exam-status';
 import {
   LogOut, Play, Clock, Award, FileText, Moon, Sun, Shield, Download, IdCard,
@@ -74,6 +77,8 @@ export default function MyExamsPage() {
   const { theme, setTheme } = useTheme();
   const [admitCard, setAdmitCard] = useState<AdmitCard | null>(null);
   const [loadingAdmit, setLoadingAdmit] = useState<string | null>(null);
+  const [certificate, setCertificate] = useState<CertificateData | null>(null);
+  const [loadingCertificate, setLoadingCertificate] = useState(false);
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<Tab>('exams');
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
@@ -124,22 +129,23 @@ export default function MyExamsPage() {
     }
   }
 
-  async function downloadCertificate(resultId: string) {
+  async function openCertificate(resultId: string) {
     if (!accessToken) return;
+    setLoadingCertificate(true);
+    setCertificate(null);
     try {
-      const cert = await resultsApi.certificate(accessToken, resultId);
-      const blob = new Blob([JSON.stringify(cert, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `certificate-${resultId.slice(0, 8)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      /* ignore */
+      const cert = await resultsApi.certificate(accessToken, resultId) as CertificateData;
+      setCertificate(cert);
+    } catch (e) {
+      toast({
+        title: 'Certificate unavailable',
+        description: e instanceof Error ? e.message : 'Results must be published before downloading a certificate.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingCertificate(false);
     }
   }
-
   if (!ready) return null;
   if (user && isAdmin(normalizeRoles(user.roles))) return null;
 
@@ -368,7 +374,7 @@ export default function MyExamsPage() {
                               </p>
                               <p className="text-sm font-semibold text-muted-foreground">{r.percentage.toFixed(1)}%</p>
                             </div>
-                            <Button variant="outline" size="sm" onClick={() => downloadCertificate(r.id)}>
+                            <Button variant="outline" size="sm" onClick={() => openCertificate(r.id)} disabled={loadingCertificate}>
                               <Download className="mr-2 h-3.5 w-3.5" /> Certificate
                             </Button>
                           </div>
@@ -444,6 +450,11 @@ export default function MyExamsPage() {
       </main>
 
       <AdmitCardDialog card={admitCard} onClose={() => setAdmitCard(null)} />
+      <CertificateDialog
+        certificate={certificate}
+        loading={loadingCertificate && !certificate}
+        onClose={() => setCertificate(null)}
+      />
     </div>
   );
 }

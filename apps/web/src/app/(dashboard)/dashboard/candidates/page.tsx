@@ -14,6 +14,7 @@ import { CreateCandidateDialog } from '@/components/admin/create-candidate-dialo
 import { usePermissions } from '@/hooks/use-permissions';
 import { Permission } from '@cbt/shared';
 import { toast } from '@/hooks/use-toast';
+import { useDebounce } from '@/hooks/use-debounce';
 import { Search, Users, CheckCircle2, Clock, UserCheck } from 'lucide-react';
 import { TableSkeleton } from '@/components/ui/skeleton';
 
@@ -37,11 +38,13 @@ export default function CandidatesPage() {
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['candidates', search],
-    queryFn: () => candidatesApi.list(accessToken!, 1, search),
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['candidates', debouncedSearch],
+    queryFn: () => candidatesApi.list(accessToken!, 1, debouncedSearch),
     enabled: !!accessToken,
+    placeholderData: (prev) => prev,
   });
 
   const kycMutation = useMutation({
@@ -160,11 +163,15 @@ export default function CandidatesPage() {
         {!items.length && (
           <EmptyState
             icon={Users}
-            title={search ? 'No candidates found' : 'No candidates yet'}
-            description={search ? 'Try a different search term.' : 'Add your first candidate to get started.'}
+            title={debouncedSearch ? 'No candidates found' : 'No candidates yet'}
+            description={debouncedSearch ? 'Try a different search term.' : 'Add your first candidate to get started.'}
           />
         )}
       </DataTable>
+
+      {isFetching && !isLoading && (
+        <p className="text-center text-xs text-muted-foreground">Updating...</p>
+      )}
     </div>
   );
 }

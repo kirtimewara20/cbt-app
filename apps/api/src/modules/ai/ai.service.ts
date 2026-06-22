@@ -33,22 +33,40 @@ export class AiService {
     private proctoringService: ProctoringService,
   ) {}
 
+  getStatus() {
+    const apiKey = this.config.get<string>('OPENAI_API_KEY');
+    return {
+      openaiConfigured: Boolean(apiKey?.trim()),
+      model: this.config.get('OPENAI_MODEL') || 'gpt-4o-mini',
+    };
+  }
+
   async generateQuestions(params: {
     topic: string;
     count: number;
     difficulty: string;
     type: string;
-  }): Promise<{ questions: GeneratedQuestion[]; source: 'openai' | 'template' }> {
-    const apiKey = this.config.get<string>('OPENAI_API_KEY');
+  }): Promise<{ questions: GeneratedQuestion[]; source: 'openai' | 'template'; message?: string }> {
+    const apiKey = this.config.get<string>('OPENAI_API_KEY')?.trim();
     if (apiKey) {
       try {
         const questions = await this.generateWithOpenAI(apiKey, params);
         return { questions, source: 'openai' };
       } catch (e) {
-        this.logger.warn(`OpenAI failed, using template: ${e}`);
+        const msg = e instanceof Error ? e.message : String(e);
+        this.logger.warn(`OpenAI failed, using template: ${msg}`);
+        return {
+          questions: this.generateFromTemplate(params),
+          source: 'template',
+          message: `OpenAI unavailable (${msg}). Using template fallback.`,
+        };
       }
     }
-    return { questions: this.generateFromTemplate(params), source: 'template' };
+    return {
+      questions: this.generateFromTemplate(params),
+      source: 'template',
+      message: 'Set OPENAI_API_KEY in .env to enable real AI generation.',
+    };
   }
 
   private async generateWithOpenAI(
@@ -57,30 +75,135 @@ export class AiService {
   ): Promise<GeneratedQuestion[]> {
     const baseUrl = this.config.get('OPENAI_BASE_URL') || 'https://api.openai.com/v1';
     const model = this.config.get('OPENAI_MODEL') || 'gpt-4o-mini';
+    const isMsq = params.type === 'MSQ';
 
-    const prompt = `Generate ${params.count} ${params.difficulty} difficulty ${params.type} exam questions about "${params.topic}".
-Return ONLY valid JSON array with objects: { title, content: { text }, options: { a,b,c,d }, correctAnswer: { value: "a"|"b"|"c"|"d" or array for MSQ }, marks: 2, negativeMarks: 0.5 }`;
+    const systemPrompt = `You are an expert exam question writer for a computer-based testing (CBT) platform.
+Create original, accurate, unambiguous questions suitable for formal assessments.
+Each question must have exactly 4 options labeled a, b, c, d.
+For MCQ, exactly one option is correct. For MSQ, two or more options may be correct.
+Do not include explanations. Avoid trick questions or ambiguous wording.`;
+
+    const userPrompt = `Generate exactly ${params.count} ${params.difficulty} difficulty ${params.type} exam questions about "${params.topic}".
+Return JSON matching the schema. Use marks: 2 and negativeMarks: 0.5 for each question.`;
 
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'exam_questions',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                questions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      title: { type: 'string' },
+                      content: {
+                        type: 'object',
+                        properties: { text: { type: 'string' } },
+                        required: ['text'],
+                        additionalProperties: false,
+                      },
+                      options: {
+                        type: 'object',
+                        properties: {
+                          a: { type: 'string' },
+                          b: { type: 'string' },
+                          c: { type: 'string' },
+                          d: { type: 'string' },
+                        },
+                        required: ['a', 'b', 'c', 'd'],
+                        additionalProperties: false,
+                      },
+                      correctAnswer: {
+                        type: 'object',
+                        properties: {
+                          value: isMsq
+                            ? { type: 'array', items: { type: 'string', enum: ['a', 'b', 'c', 'd'] } }
+                            : { type: 'string', enum: ['a', 'b', 'c', 'd'] },
+                        },
+                        required: ['value'],
+                        additionalProperties: false,
+                      },
+                      marks: { type: 'number' },
+                      negativeMarks: { type: 'number' },
+                    },
+                    required: ['title', 'content', 'options', 'correctAnswer', 'marks', 'negativeMarks'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['questions'],
+              additionalProperties: false,
+            },
+          },
+        },
       }),
     });
 
-    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`OpenAI API error ${res.status}: ${errBody.slice(0, 200)}`);
+    }
+
     const data = await res.json() as { choices: { message: { content: string } }[] };
-    const parsed = JSON.parse(data.choices[0].message.content) as { questions?: GeneratedQuestion[] } | GeneratedQuestion[];
-    const items = Array.isArray(parsed) ? parsed : parsed.questions || [];
-    return items.map((q) => ({
-      ...q,
-      type: params.type,
-      difficulty: params.difficulty,
-    }));
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) throw new Error('OpenAI returned empty response');
+
+    const parsed = JSON.parse(content) as { questions?: GeneratedQuestion[] };
+    const items = parsed.questions || [];
+    if (!items.length) throw new Error('OpenAI returned no questions');
+
+    return this.normalizeQuestions(items.slice(0, params.count), params);
+  }
+
+  private normalizeQuestions(
+    items: GeneratedQuestion[],
+    params: { topic: string; difficulty: string; type: string },
+  ): GeneratedQuestion[] {
+    return items.map((q, i) => {
+      const options = q.options || {};
+      const normalizedOptions: Record<string, string> = {
+        a: String(options.a ?? options.A ?? ''),
+        b: String(options.b ?? options.B ?? ''),
+        c: String(options.c ?? options.C ?? ''),
+        d: String(options.d ?? options.D ?? ''),
+      };
+
+      let correctValue = q.correctAnswer?.value;
+      if (params.type === 'MSQ' && !Array.isArray(correctValue)) {
+        correctValue = correctValue ? [String(correctValue).toLowerCase()] : [];
+      } else if (params.type === 'MCQ' && Array.isArray(correctValue)) {
+        correctValue = String(correctValue[0] ?? 'a').toLowerCase();
+      } else if (typeof correctValue === 'string') {
+        correctValue = correctValue.toLowerCase();
+      }
+
+      const text = q.content?.text?.trim() || `Question ${i + 1} about ${params.topic}`;
+
+      return {
+        title: q.title?.trim() || `${params.topic} — Question ${i + 1}`,
+        type: params.type,
+        difficulty: params.difficulty,
+        content: { text },
+        options: normalizedOptions,
+        correctAnswer: { value: correctValue as string | string[] },
+        marks: q.marks ?? 2,
+        negativeMarks: q.negativeMarks ?? 0.5,
+      };
+    });
   }
 
   private generateFromTemplate(params: { topic: string; count: number; difficulty: string; type: string }): GeneratedQuestion[] {

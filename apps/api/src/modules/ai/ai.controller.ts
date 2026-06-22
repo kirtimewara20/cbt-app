@@ -14,6 +14,13 @@ import { Permission } from '@cbt/shared';
 export class AiController {
   constructor(private aiService: AiService) {}
 
+  @Get('status')
+  @RequirePermissions(Permission.QUESTION_CREATE)
+  @ApiOperation({ summary: 'Check AI / OpenAI configuration status' })
+  getStatus() {
+    return this.aiService.getStatus();
+  }
+
   @Post('questions/generate')
   @RequirePermissions(Permission.QUESTION_CREATE)
   @ApiOperation({ summary: 'AI-generate exam questions' })

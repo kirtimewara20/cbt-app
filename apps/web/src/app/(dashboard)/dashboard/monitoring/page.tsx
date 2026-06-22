@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getProctoringSocket } from '@/lib/socket';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,41 +13,87 @@ import { PageHeader } from '@/components/layout/page-header';
 import { StatCard } from '@/components/layout/stat-card';
 import { Activity, AlertTriangle, Pause, Play, XCircle, Radio, Shield } from 'lucide-react';
 
+type LiveCandidate = {
+  sessionId: string;
+  name: string;
+  riskScore: number;
+  status: string;
+  timeRemaining?: number;
+  recentViolations: number;
+};
+
+type RiskPatch = {
+  riskScore: number;
+  violations?: unknown[];
+};
+
 export default function MonitoringPage() {
   const { accessToken } = useRequireAuth(true);
   const queryClient = useQueryClient();
   const [examId, setExamId] = useState('');
   const [liveAlerts, setLiveAlerts] = useState<{ sessionId: string; type: string; severity: string; timestamp: string }[]>([]);
+  const [riskPatches, setRiskPatches] = useState<Record<string, RiskPatch>>({});
+
+  useEffect(() => {
+    setRiskPatches({});
+  }, [examId]);
 
   useEffect(() => {
     const socket = getProctoringSocket();
     socket.connect();
     socket.emit('proctoring:join-monitoring');
-    socket.on('proctoring:violation', (data: { sessionId: string; type: string; severity: string; timestamp: string }) => {
+
+    const onViolation = (data: { sessionId: string; type: string; severity: string; timestamp: string }) => {
       setLiveAlerts((prev) => [data, ...prev].slice(0, 20));
       toast({ title: `Violation: ${data.type}`, description: `Severity: ${data.severity}`, variant: 'destructive' });
-    });
-    socket.on('proctoring:risk-update', () => {
-      queryClient.invalidateQueries({ queryKey: ['monitoring', examId] });
-    });
-    return () => {
-      socket.off('proctoring:violation');
-      socket.off('proctoring:risk-update');
     };
-  }, [examId, queryClient]);
+
+    const onRiskUpdate = (data: { sessionId: string; riskScore: number; violations?: unknown[] }) => {
+      setRiskPatches((prev) => ({
+        ...prev,
+        [data.sessionId]: { riskScore: data.riskScore, violations: data.violations },
+      }));
+    };
+
+    socket.on('proctoring:violation', onViolation);
+    socket.on('proctoring:risk-update', onRiskUpdate);
+
+    return () => {
+      socket.off('proctoring:violation', onViolation);
+      socket.off('proctoring:risk-update', onRiskUpdate);
+    };
+  }, []);
 
   const { data: exams } = useQuery({
     queryKey: ['exams'],
-    queryFn: () => examsApi.list(accessToken!),
+    queryFn: () => examsApi.list(accessToken!) as Promise<{ items: { id: string; title: string; status: string }[] }>,
     enabled: !!accessToken,
   });
 
+type LiveMonitoringData = {
+  activeCount: number;
+  candidates: LiveCandidate[];
+};
+
   const { data: live } = useQuery({
     queryKey: ['monitoring', examId],
-    queryFn: () => proctoringApi.live(accessToken!, examId),
+    queryFn: () => proctoringApi.live(accessToken!, examId) as Promise<LiveMonitoringData>,
     enabled: !!accessToken && !!examId,
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   });
+
+  const candidates = useMemo(() => {
+    const base = live?.candidates || [];
+    return base.map((c) => {
+      const patch = riskPatches[c.sessionId];
+      if (!patch) return c;
+      return {
+        ...c,
+        riskScore: patch.riskScore,
+        recentViolations: patch.violations?.length ?? c.recentViolations,
+      };
+    });
+  }, [live?.candidates, riskPatches]);
 
   const interveneMutation = useMutation({
     mutationFn: ({ sessionId, type, message }: { sessionId: string; type: string; message?: string }) =>
@@ -59,7 +105,7 @@ export default function MonitoringPage() {
     onError: (e: Error) => toast({ title: 'Intervention failed', description: e.message, variant: 'destructive' }),
   });
 
-  const highRisk = (live?.candidates || []).filter((c: { riskScore: number }) => c.riskScore > 70).length;
+  const highRisk = candidates.filter((c) => c.riskScore > 70).length;
 
   return (
     <div className="space-y-8">
@@ -93,11 +139,8 @@ export default function MonitoringPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {(live.candidates || []).map((c: {
-              sessionId: string; name: string; riskScore: number; status: string;
-              timeRemaining?: number; recentViolations: number;
-            }) => (
-              <Card key={c.sessionId} className={`surface-card ${c.riskScore > 70 ? 'border-red-500/40 ring-1 ring-red-500/20' : ''}`}>
+            {candidates.map((c) => (
+              <Card key={c.sessionId} className={`surface-card transition-all duration-300 ${c.riskScore > 70 ? 'border-red-500/40 ring-1 ring-red-500/20' : ''}`}>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-sm font-bold">{c.name}</CardTitle>
@@ -131,7 +174,7 @@ export default function MonitoringPage() {
               </Card>
             ))}
           </div>
-          {!live.candidates?.length && (
+          {!candidates.length && (
             <Card className="surface-card">
               <CardContent className="py-16 text-center text-muted-foreground">No active sessions for this exam.</CardContent>
             </Card>

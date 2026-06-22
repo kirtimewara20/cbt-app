@@ -29,7 +29,8 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['../../.env', '.env'],
+      // apps/api/.env wins over monorepo root so API secrets (e.g. OPENAI_API_KEY) are not blanked
+      envFilePath: ['.env', '../../.env'],
     }),
     RedisModule,
     ThrottlerModule.forRootAsync({

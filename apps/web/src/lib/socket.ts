@@ -10,25 +10,52 @@ function getWsUrl(): string {
 }
 
 let proctoringSocket: Socket | null = null;
+let examSocket: Socket | null = null;
+
+function socketAuth() {
+  const { accessToken, user } = useAuthStore.getState();
+  return {
+    token: accessToken,
+    tenantId: user?.tenantId || 'default',
+    role: user?.roles?.some((r) => r === 'CANDIDATE') ? 'candidate' : 'admin',
+  };
+}
 
 export function getProctoringSocket(): Socket {
-  if (proctoringSocket?.connected) return proctoringSocket;
+  if (proctoringSocket) return proctoringSocket;
 
-  const { accessToken, user } = useAuthStore.getState();
   proctoringSocket = io(`${getWsUrl()}/proctoring`, {
-    auth: {
-      token: accessToken,
-      tenantId: user?.tenantId || 'default',
-      role: user?.roles?.includes('CANDIDATE') ? 'candidate' : 'admin',
-    },
+    auth: socketAuth(),
     transports: ['websocket', 'polling'],
     autoConnect: false,
+    reconnection: true,
+    reconnectionAttempts: 10,
   });
 
   return proctoringSocket;
 }
 
+export function getExamSocket(): Socket {
+  if (examSocket) return examSocket;
+
+  examSocket = io(`${getWsUrl()}/exam`, {
+    auth: socketAuth(),
+    transports: ['websocket', 'polling'],
+    autoConnect: false,
+    reconnection: true,
+    reconnectionAttempts: 10,
+  });
+
+  return examSocket;
+}
+
+export function disconnectExamSocket() {
+  examSocket?.disconnect();
+  examSocket = null;
+}
+
 export function disconnectSockets() {
   proctoringSocket?.disconnect();
   proctoringSocket = null;
+  disconnectExamSocket();
 }

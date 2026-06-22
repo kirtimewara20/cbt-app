@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { parsePage, parseLimit } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class ResultsService {
@@ -96,7 +97,9 @@ export class ResultsService {
     return { examId, published: true };
   }
 
-  async getExamResults(examId: string, page = 1, limit = 50) {
+  async getExamResults(examId: string, page?: unknown, limit?: unknown) {
+    const p = parsePage(page);
+    const l = parseLimit(limit, 50);
     const [items, total] = await Promise.all([
       this.prisma.examResult.findMany({
         where: { examId },
@@ -106,12 +109,12 @@ export class ResultsService {
           },
         },
         orderBy: { totalScore: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        skip: (p - 1) * l,
+        take: l,
       }),
       this.prisma.examResult.count({ where: { examId } }),
     ]);
-    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return { items, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
   }
 
   private gradeAnswer(
