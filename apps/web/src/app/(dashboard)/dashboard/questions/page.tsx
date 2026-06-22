@@ -57,7 +57,13 @@ export default function QuestionsPage() {
       marks: 2,
       negativeMarks: 0.5,
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['questions'] }); setShowCreate(false); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['questions'] });
+      setShowCreate(false);
+      toast({ title: 'Question saved', variant: 'success' });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Save failed', description: e.message, variant: 'destructive' }),
   });
 
   const approveMutation = useMutation({

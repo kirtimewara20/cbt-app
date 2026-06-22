@@ -1,20 +1,27 @@
 import { useAuthStore } from '@/stores/auth-store';
 import { isAdmin, isCandidate, normalizeRoles } from './roles';
 
-const PRODUCTION_API =
-  process.env.NEXT_PUBLIC_API_URL || 'https://cbt-api-ktkr.onrender.com/api/v1';
+const RENDER_API_BASE =
+  process.env.API_PROXY_URL || 'https://cbt-api-ktkr.onrender.com';
 
-/** Browser calls Render directly (CORS allows *.vercel.app). Server-side uses the Vercel proxy route. */
+function isLocalDevHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
+/**
+ * Browser on Vercel uses same-origin `/api/v1` proxy (no CORS, retries on Render cold start).
+ * Local dev talks to the API directly. SSR uses the Render base URL.
+ */
 function getApiUrl(): string {
   if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') {
+    if (isLocalDevHost()) {
       return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
     }
-    return PRODUCTION_API.replace(/\/$/, '');
+    return '/api/v1';
   }
-  const base = process.env.API_PROXY_URL || 'https://cbt-api-ktkr.onrender.com';
-  return `${base.replace(/\/$/, '')}/api/v1`;
+  return `${RENDER_API_BASE.replace(/\/$/, '')}/api/v1`;
 }
 
 function isHtmlResponse(raw: string): boolean {
@@ -117,9 +124,7 @@ export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): P
   headers['X-Tenant-ID'] = skipAuth ? getTenantId() : getAuthTenantId();
 
   const requestUrl = `${getApiUrl()}${endpoint}`;
-  const useColdStartRetry =
-    typeof window !== 'undefined' &&
-    (endpoint.startsWith('/auth/') || endpoint.includes('/health'));
+  const useColdStartRetry = typeof window !== 'undefined' && !isLocalDevHost();
 
   let response = useColdStartRetry
     ? await fetchWithColdStartRetry(requestUrl, { ...fetchOptions, headers })

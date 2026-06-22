@@ -35,9 +35,11 @@ export default function LoginPage() {
 
   // Wake Render free-tier API while the user reads the login form
   useEffect(() => {
-    const api =
-      process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ||
-      'https://cbt-api-ktkr.onrender.com/api/v1';
+    const isLocal =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const api = isLocal
+      ? (process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://localhost:4000/api/v1')
+      : '/api/v1';
     fetch(`${api}/health`, { cache: 'no-store' }).catch(() => {});
   }, []);
 
