@@ -31,6 +31,13 @@ export class ExamsController {
     return this.examsService.getAvailableForCandidate(userId);
   }
 
+  @Get(':id/instructions')
+  @RequirePermissions(Permission.EXAM_TAKE)
+  @ApiOperation({ summary: 'Get exam instructions for registered candidate (no answers)' })
+  instructions(@Param('id') id: string, @CurrentUser('sub') userId: string) {
+    return this.examsService.getInstructionsForCandidate(id, userId);
+  }
+
   @Get()
   @RequirePermissions(Permission.EXAM_READ)
   findAll(

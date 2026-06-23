@@ -2,37 +2,46 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { DEFAULT_EXAM_TIMEZONE } from '@cbt/shared';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { examsApi } from '@/lib/api';
-import { useAuthStore } from '@/stores/auth-store';
+import { useRequireCandidate } from '@/hooks/use-auth';
 import { Logo } from '@/components/layout/logo';
-import { AlertTriangle, Clock, Shield, CheckCircle2, ArrowLeft } from 'lucide-react';
+import { getExamStatus } from '@/lib/exam-status';
+import { formatExamTimeRange } from '@/lib/exam-dates';
+import { AlertTriangle, Clock, Shield, CheckCircle2, ArrowLeft, Calendar } from 'lucide-react';
+
+type ExamInstructions = {
+  title: string;
+  code: string;
+  status: string;
+  startTime: string;
+  endTime: string;
+  timezone?: string;
+  settings?: { durationMinutes: number; passingScore: number; negativeMarking: boolean };
+  securityPolicy?: { fullscreen: boolean; blockCopyPaste: boolean; proctoringEnabled: boolean };
+  registration: { sessions?: { status: string }[] };
+};
 
 export default function ExamInstructionsPage() {
   const params = useParams();
   const examId = params.examId as string;
   const router = useRouter();
-  const { accessToken, user } = useAuthStore();
-  const [exam, setExam] = useState<{
-    title: string;
-    code: string;
-    settings?: { durationMinutes: number; passingScore: number; negativeMarking: boolean };
-    securityPolicy?: { fullscreen: boolean; blockCopyPaste: boolean; proctoringEnabled: boolean };
-    startTime: string;
-    endTime: string;
-  } | null>(null);
+  const { accessToken, user, ready } = useRequireCandidate();
+  const [exam, setExam] = useState<ExamInstructions | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!accessToken) { router.push('/login'); return; }
-    examsApi.get(accessToken, examId)
-      .then((data) => setExam(data as typeof exam))
-      .catch((e) => setError(e.message));
-  }, [accessToken, examId, router]);
+    if (!ready || !accessToken) return;
+    examsApi.instructions(accessToken, examId)
+      .then((data) => setExam(data as ExamInstructions))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load exam'));
+  }, [accessToken, examId, ready]);
 
+  if (!ready) return null;
   if (error) return (
     <div className="flex min-h-screen items-center justify-center mesh-bg p-4">
       <Card className="max-w-md p-6"><p className="text-destructive">{error}</p><Button className="mt-4" onClick={() => router.push('/my-exams')}>Back</Button></Card>
@@ -42,6 +51,12 @@ export default function ExamInstructionsPage() {
 
   const settings = exam.settings ?? { durationMinutes: 30, passingScore: 40, negativeMarking: true };
   const security = exam.securityPolicy ?? { fullscreen: true, blockCopyPaste: true, proctoringEnabled: false };
+  const tz = exam.timezone || DEFAULT_EXAM_TIMEZONE;
+  const status = getExamStatus({
+    exam: { status: exam.status, startTime: exam.startTime, endTime: exam.endTime },
+    sessions: exam.registration.sessions,
+  });
+  const canBegin = agreed && !status.actionDisabled;
 
   return (
     <div className="min-h-screen mesh-bg">
@@ -59,7 +74,30 @@ export default function ExamInstructionsPage() {
           <Badge variant="secondary" className="mb-2">{exam.code}</Badge>
           <h1 className="text-3xl font-bold tracking-tight">{exam.title}</h1>
           <p className="text-muted-foreground">Please read all instructions carefully before starting</p>
+          <Badge variant={status.variant}>{status.label}</Badge>
         </div>
+
+        <Card className="surface-card">
+          <CardContent className="flex items-start gap-3 p-5">
+            <Calendar className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <div>
+              <p className="text-sm font-semibold">Exam Schedule</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {formatExamTimeRange(exam.startTime, exam.endTime, tz)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {status.actionDisabled && status.phase !== 'submitted' && (
+          <Card className="border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20">
+            <CardContent className="p-4 text-sm text-amber-800 dark:text-amber-200">
+              {status.phase === 'upcoming' && 'This exam is not open yet. Check the schedule above.'}
+              {status.phase === 'ended' && 'The exam window has ended. You can no longer start this exam.'}
+              {status.phase === 'unavailable' && 'This exam is not available for taking right now.'}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-3">
           {[
@@ -102,7 +140,7 @@ export default function ExamInstructionsPage() {
         </Card>
 
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border bg-card p-5 shadow-card">
-          <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-1" />
+          <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-1" disabled={status.actionDisabled} />
           <span className="text-sm">
             I, <strong>{user?.firstName} {user?.lastName}</strong>, confirm that I have read and understood all exam rules and agree to comply with security policies.
           </span>
@@ -111,7 +149,7 @@ export default function ExamInstructionsPage() {
         <Button
           className="w-full shadow-sm"
           size="lg"
-          disabled={!agreed}
+          disabled={!canBegin}
           onClick={async () => {
             if (security.fullscreen) {
               try {
@@ -126,7 +164,8 @@ export default function ExamInstructionsPage() {
             router.push(`/exam/start/${examId}`);
           }}
         >
-          <CheckCircle2 className="mr-2 h-5 w-5" /> Begin Examination
+          <CheckCircle2 className="mr-2 h-5 w-5" />
+          {status.phase === 'in_progress' ? 'Resume Examination' : 'Begin Examination'}
         </Button>
       </main>
     </div>

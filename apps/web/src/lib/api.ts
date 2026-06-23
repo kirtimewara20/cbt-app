@@ -41,28 +41,12 @@ function formatNonJsonError(raw: string, ok: boolean): string {
   return 'API unavailable. Wait 30 seconds and try again.';
 }
 
-const COLD_START_RETRY_MS = 15_000;
-const COLD_START_MAX_ATTEMPTS = 3;
+import { fetchWithColdStartRetry as fetchWithBackoff } from './cold-start-retry';
 
 async function fetchWithColdStartRetry(url: string, init: RequestInit): Promise<Response> {
-  let lastResponse: Response | null = null;
-  for (let attempt = 0; attempt < COLD_START_MAX_ATTEMPTS; attempt++) {
-    try {
-      const response = await fetch(url, init);
-      lastResponse = response;
-      if (response.ok) return response;
-      const raw = await response.clone().text();
-      const retryable =
-        response.status >= 502 ||
-        response.status === 503 ||
-        isHtmlResponse(raw);
-      if (!retryable || attempt === COLD_START_MAX_ATTEMPTS - 1) return response;
-    } catch {
-      if (attempt === COLD_START_MAX_ATTEMPTS - 1) throw new Error(formatNonJsonError('', false));
-    }
-    await new Promise((resolve) => setTimeout(resolve, COLD_START_RETRY_MS));
-  }
-  return lastResponse!;
+  return fetchWithBackoff(url, init, (status, raw) =>
+    status >= 502 || status === 503 || isHtmlResponse(raw),
+  );
 }
 
 const DEFAULT_TENANT = process.env.NEXT_PUBLIC_TENANT_ID || 'default';
@@ -135,7 +119,9 @@ export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): P
     const newToken = await refreshPromise;
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;
-      response = await fetch(requestUrl, { ...fetchOptions, headers });
+      response = useColdStartRetry
+        ? await fetchWithColdStartRetry(requestUrl, { ...fetchOptions, headers })
+        : await fetch(requestUrl, { ...fetchOptions, headers });
     }
   }
 
@@ -230,6 +216,7 @@ export const examsApi = {
   list: (token: string, page = 1, search = '') =>
     apiFetch(`/exams?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}`, authHeaders(token)),
   get: (token: string, id: string) => apiFetch(`/exams/${id}`, authHeaders(token)),
+  instructions: (token: string, id: string) => apiFetch(`/exams/${id}/instructions`, authHeaders(token)),
   create: (token: string, body: unknown) =>
     apiFetch('/exams', { method: 'POST', body: JSON.stringify(body), ...authHeaders(token) }),
   publish: (token: string, id: string) =>

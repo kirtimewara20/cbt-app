@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/permissions.decorator';
@@ -25,7 +25,10 @@ export class HealthController {
       await this.prisma.$queryRaw`SELECT 1`;
       return { status: 'ready', database: 'connected' };
     } catch {
-      return { status: 'not_ready', database: 'disconnected' };
+      throw new HttpException(
+        { status: 'not_ready', database: 'disconnected' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 }

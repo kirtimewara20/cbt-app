@@ -191,6 +191,7 @@ export class CandidatesService {  constructor(private prisma: PrismaService) {}
       examCode: registration.exam.code,
       startTime: registration.exam.startTime,
       endTime: registration.exam.endTime,
+      timezone: registration.exam.timezone,
       venue: 'Online Proctored Examination',
       instructions: [
         'Arrive 15 minutes before the scheduled start time.',

@@ -5,6 +5,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Logo } from '@/components/layout/logo';
+import { DEFAULT_EXAM_TIMEZONE } from '@cbt/shared';
+import { formatExamTimeRange } from '@/lib/exam-dates';
 import { Calendar, MapPin, Printer, User } from 'lucide-react';
 
 export type AdmitCard = {
@@ -16,6 +18,7 @@ export type AdmitCard = {
   examCode: string;
   startTime: string;
   endTime: string;
+  timezone?: string;
   venue: string;
   instructions: string[];
 };
@@ -70,7 +73,7 @@ export function AdmitCardDialog({ card, onClose }: AdmitCardDialogProps) {
                   <div>
                     <p className="font-semibold">Schedule</p>
                     <p className="text-muted-foreground">
-                      {new Date(card.startTime).toLocaleString()} — {new Date(card.endTime).toLocaleString()}
+                      {formatExamTimeRange(card.startTime, card.endTime, card.timezone || DEFAULT_EXAM_TIMEZONE)}
                     </p>
                   </div>
                 </div>

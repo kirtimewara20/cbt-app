@@ -63,6 +63,11 @@ export class ExamEngineService {
 
     const settings = (exam.settings || {}) as Record<string, unknown>;
     const durationMinutes = (settings.durationMinutes as number) || 120;
+    const initialRemaining = this.calculateTimeRemaining(
+      { startedAt: now, timeRemainingSeconds: durationMinutes * 60 },
+      durationMinutes,
+      exam.endTime,
+    );
 
     const session = await this.prisma.examSession.create({
       data: {
@@ -71,7 +76,7 @@ export class ExamEngineService {
         registrationId: registration.id,
         status: 'IN_PROGRESS',
         startedAt: now,
-        timeRemainingSeconds: durationMinutes * 60,
+        timeRemainingSeconds: initialRemaining,
         currentSectionId: exam.sections[0]?.id,
         ipAddress,
         deviceFingerprint,
@@ -105,7 +110,22 @@ export class ExamEngineService {
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
       include: {
-        exam: true,
+        exam: {
+          include: {
+            sections: {
+              include: {
+                questions: {
+                  include: {
+                    question: {
+                      include: { versions: { take: 1, orderBy: { versionNumber: 'desc' } } },
+                    },
+                  },
+                },
+              },
+              orderBy: { orderIndex: 'asc' },
+            },
+          },
+        },
         responses: true,
       },
     });
@@ -114,25 +134,9 @@ export class ExamEngineService {
       throw new BadRequestException('Session does not belong to candidate');
     }
 
-    const exam = await this.prisma.exam.findUnique({
-      where: { id: session.examId },
-      include: {
-        sections: {
-          include: {
-            questions: {
-              include: {
-                question: {
-                  include: { versions: { take: 1, orderBy: { versionNumber: 'desc' } } },
-                },
-              },
-            },
-          },
-          orderBy: { orderIndex: 'asc' },
-        },
-      },
-    });
-
-    const timeRemaining = await this.calculateTimeRemaining(session);
+    const exam = session.exam;
+    const durationMinutes = this.getDurationMinutes(exam?.settings);
+    const timeRemaining = this.calculateTimeRemaining(session, durationMinutes, exam?.endTime);
 
     const questions = (session.questionOrder as string[] || []).map((qId) => {
       for (const section of exam?.sections || []) {
@@ -239,12 +243,21 @@ export class ExamEngineService {
   }
 
   async heartbeat(sessionId: string, userId: string) {
-    const { session } = await this.assertSessionOwner(sessionId, userId);
+    const candidateId = await resolveCandidateId(this.prisma, userId);
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: { exam: { select: { settings: true, endTime: true } } },
+    });
+    if (!session) throw new NotFoundException('Session not found');
+    if (session.candidateId !== candidateId) {
+      throw new ForbiddenException('Session does not belong to this candidate');
+    }
     if (session.status !== 'IN_PROGRESS') {
       return { alive: false, autoSubmitted: false };
     }
 
-    const timeRemaining = await this.calculateTimeRemaining(session);
+    const durationMinutes = this.getDurationMinutes(session.exam?.settings);
+    const timeRemaining = this.calculateTimeRemaining(session, durationMinutes, session.exam?.endTime);
     await this.prisma.examSession.update({
       where: { id: sessionId },
       data: { timeRemainingSeconds: timeRemaining },
@@ -262,14 +275,26 @@ export class ExamEngineService {
     return { alive: true, autoSubmitted: false, timeRemainingSeconds: timeRemaining };
   }
 
-  private async calculateTimeRemaining(session: {
-    startedAt: Date | null;
-    timeRemainingSeconds: number | null;
-    examId: string;
-  }) {
-    const exam = await this.prisma.exam.findUnique({ where: { id: session.examId } });
-    const settings = (exam?.settings || {}) as Record<string, unknown>;
-    const durationMinutes = (settings.durationMinutes as number) || 120;
+  private getDurationMinutes(settings: unknown): number {
+    const config = (settings || {}) as Record<string, unknown>;
+    return (config.durationMinutes as number) || 120;
+  }
+
+  private calculateTimeRemaining(
+    session: { startedAt: Date | null; timeRemainingSeconds: number | null },
+    durationMinutes: number,
+    examEndTime?: Date | null,
+  ): number {
+    const fromDuration = this.calculateTimeRemainingFromDuration(session, durationMinutes);
+    if (!examEndTime) return fromDuration;
+    const untilWindowEnd = Math.floor((examEndTime.getTime() - Date.now()) / 1000);
+    return Math.max(0, Math.min(fromDuration, untilWindowEnd));
+  }
+
+  private calculateTimeRemainingFromDuration(
+    session: { startedAt: Date | null; timeRemainingSeconds: number | null },
+    durationMinutes: number,
+  ): number {
     const totalSeconds = durationMinutes * 60;
     if (!session.startedAt) return session.timeRemainingSeconds ?? totalSeconds;
     const elapsed = Math.floor((Date.now() - session.startedAt.getTime()) / 1000);

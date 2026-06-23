@@ -10,9 +10,16 @@ import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolveTenantCached } from '../../common/utils/tenant-cache';
 import { MfaService } from './mfa.service';
 import { MailService } from '../mail/mail.service';
-import { LoginDto, RegisterDto, MfaVerifyDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
+import {
+  LoginDto,
+  RegisterDto,
+  MfaVerifyDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+} from './dto/auth.dto';
 import { Role, getPermissionsForRoles, JwtPayload } from '@cbt/shared';
 
 const BCRYPT_ROUNDS = 12;
@@ -162,20 +169,21 @@ export class AuthService {
       throw new UnauthorizedException('Account is not active');
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
-    });
-
-    await this.prisma.loginHistory.create({
-      data: {
-        userId: user.id,
-        ipAddress,
-        userAgent,
-        deviceFingerprint: dto.deviceFingerprint,
-        success: true,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+      }),
+      this.prisma.loginHistory.create({
+        data: {
+          userId: user.id,
+          ipAddress,
+          userAgent,
+          deviceFingerprint: dto.deviceFingerprint,
+          success: true,
+        },
+      }),
+    ]);
 
     if (user.mfaEnabled && user.mfaSecret) {
       const mfaToken = this.jwt.sign(
@@ -353,8 +361,7 @@ export class AuthService {
     const accessToken = this.jwt.sign(payload);
     const refreshToken = uuidv4();
     const refreshExpiry = this.config.get('JWT_REFRESH_EXPIRY', '7d');
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + parseInt(refreshExpiry) || 7);
+    const expiresAt = this.parseRefreshExpiry(refreshExpiry);
 
     await this.prisma.session.create({
       data: {
@@ -415,12 +422,23 @@ export class AuthService {
   }
 
   private async resolveTenant(tenantId?: string) {
-    if (!tenantId) {
-      return this.prisma.tenant.findFirst({ where: { slug: 'default' } });
+    return resolveTenantCached(this.prisma, tenantId);
+  }
+
+  private parseRefreshExpiry(expiry: string): Date {
+    const match = /^(\d+)([smhd])$/i.exec(expiry.trim());
+    const expiresAt = new Date();
+    if (!match) {
+      expiresAt.setDate(expiresAt.getDate() + 7);
+      return expiresAt;
     }
-    return this.prisma.tenant.findFirst({
-      where: { OR: [{ id: tenantId }, { slug: tenantId }] },
-    });
+    const value = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    if (unit === 's') expiresAt.setSeconds(expiresAt.getSeconds() + value);
+    else if (unit === 'm') expiresAt.setMinutes(expiresAt.getMinutes() + value);
+    else if (unit === 'h') expiresAt.setHours(expiresAt.getHours() + value);
+    else expiresAt.setDate(expiresAt.getDate() + value);
+    return expiresAt;
   }
 
   private hashToken(token: string): string {

@@ -1,6 +1,7 @@
-import { Injectable, NestMiddleware, BadRequestException } from '@nestjs/common';
+import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { resolveTenantByHeaderCached } from '../utils/tenant-cache';
 
 export interface TenantRequest extends Request {
   tenantId?: string;
@@ -18,9 +19,7 @@ export class TenantMiddleware implements NestMiddleware {
     let tenant = null;
 
     if (tenantHeader) {
-      tenant = await this.prisma.tenant.findFirst({
-        where: { OR: [{ slug: tenantHeader }, { id: tenantHeader }] },
-      });
+      tenant = await resolveTenantByHeaderCached(this.prisma, tenantHeader);
     } else {
       const subdomain = host.split('.')[0];
       if (subdomain && subdomain !== 'localhost' && subdomain !== 'api') {

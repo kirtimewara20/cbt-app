@@ -73,16 +73,26 @@ export class ResultsService {
   async calculateRanks(examId: string) {
     const results = await this.prisma.examResult.findMany({
       where: { examId },
-      orderBy: { totalScore: 'desc' },
+      orderBy: [{ totalScore: 'desc' }, { createdAt: 'asc' }],
     });
 
     const total = results.length;
+    let currentRank = 0;
+    let previousScore: number | null = null;
+
     for (let i = 0; i < results.length; i++) {
-      const rank = i + 1;
-      const percentile = ((total - rank) / total) * 100;
+      const score = results[i].totalScore;
+      if (previousScore === null || score < previousScore) {
+        currentRank = i + 1;
+        previousScore = score;
+      }
+
+      const percentile =
+        total <= 1 ? 100 : ((total - currentRank) / (total - 1)) * 100;
+
       await this.prisma.examResult.update({
         where: { id: results[i].id },
-        data: { rank, percentile },
+        data: { rank: currentRank, percentile },
       });
     }
 
@@ -90,6 +100,7 @@ export class ResultsService {
   }
 
   async publishResults(examId: string) {
+    await this.calculateRanks(examId);
     await this.prisma.examResult.updateMany({
       where: { examId },
       data: { published: true, publishedAt: new Date(), evaluationStatus: 'PUBLISHED' },
@@ -198,10 +209,27 @@ export class ResultsService {
 
     const items = await this.prisma.examResult.findMany({
       where: { candidateId: candidate.id, published: true },
-      include: { exam: { select: { title: true, code: true } } },
+      include: { exam: { select: { title: true, code: true, settings: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    return { items };
+
+    const examIds = [...new Set(items.map((r) => r.examId))];
+    const totals = await Promise.all(
+      examIds.map(async (examId) => {
+        const count = await this.prisma.examResult.count({
+          where: { examId, published: true },
+        });
+        return [examId, count] as const;
+      }),
+    );
+    const totalByExam = Object.fromEntries(totals);
+
+    return {
+      items: items.map((r) => ({
+        ...r,
+        totalCandidates: totalByExam[r.examId] ?? null,
+      })),
+    };
   }
 
   async getCertificate(userId: string, resultId: string) {
@@ -211,11 +239,17 @@ export class ResultsService {
     const result = await this.prisma.examResult.findFirst({
       where: { id: resultId, candidateId: candidate.id, published: true },
       include: {
-        exam: { select: { title: true, code: true } },
+        exam: { select: { title: true, code: true, settings: true } },
         candidate: { include: { user: { select: { firstName: true, lastName: true, email: true } } } },
       },
     });
     if (!result) throw new NotFoundException('Published result not found');
+
+    const totalCandidates = await this.prisma.examResult.count({
+      where: { examId: result.examId, published: true },
+    });
+    const settings = (result.exam.settings || {}) as Record<string, unknown>;
+    const passingScore = (settings.passingScore as number) ?? 40;
 
     return {
       certificateId: result.id,
@@ -227,8 +261,10 @@ export class ResultsService {
       totalScore: result.totalScore,
       maxScore: result.maxScore,
       percentage: result.percentage,
+      passingScore,
       rank: result.rank,
       percentile: result.percentile,
+      totalCandidates,
       issuedAt: result.publishedAt ?? result.createdAt,
       verificationUrl: `/verify/certificate/${result.id}`,
     };

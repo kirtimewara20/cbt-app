@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -14,6 +15,49 @@ interface QuestionInputProps {
   };
   answer: string | string[] | undefined;
   onSave: (value: string | string[]) => void;
+}
+
+const TEXT_DEBOUNCE_MS = 800;
+
+function DebouncedTextarea({
+  value,
+  onSave,
+  ...props
+}: {
+  value: string;
+  onSave: (value: string) => void;
+} & React.ComponentProps<typeof Textarea>) {
+  const [local, setLocal] = useState(value);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setLocal(value);
+  }, [value, props.placeholder]);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
+
+  const scheduleSave = (next: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => onSave(next), TEXT_DEBOUNCE_MS);
+  };
+
+  return (
+    <Textarea
+      {...props}
+      value={local}
+      onChange={(e) => {
+        const next = e.target.value;
+        setLocal(next);
+        scheduleSave(next);
+      }}
+      onBlur={(e) => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        onSave(e.target.value);
+      }}
+    />
+  );
 }
 
 export function QuestionInput({ question, answer, onSave }: QuestionInputProps) {
@@ -71,12 +115,11 @@ export function QuestionInput({ question, answer, onSave }: QuestionInputProps) 
 
   if (type === 'SUBJECTIVE' || type === 'CASE_STUDY') {
     return (
-      <Textarea
+      <DebouncedTextarea
         placeholder="Type your answer here..."
         rows={8}
         value={(answer as string) ?? ''}
-        onChange={(e) => onSave(e.target.value)}
-        onBlur={(e) => { if (e.target.value.trim()) onSave(e.target.value); }}
+        onSave={onSave}
       />
     );
   }
@@ -85,13 +128,12 @@ export function QuestionInput({ question, answer, onSave }: QuestionInputProps) 
     return (
       <div className="space-y-2">
         <p className="text-sm text-muted-foreground">Write your code solution below.</p>
-        <Textarea
+        <DebouncedTextarea
           placeholder="// Your code here..."
           rows={12}
           className="font-mono text-sm"
           value={(answer as string) ?? ''}
-          onChange={(e) => onSave(e.target.value)}
-          onBlur={(e) => { if (e.target.value.trim()) onSave(e.target.value); }}
+          onSave={onSave}
         />
       </div>
     );
@@ -107,12 +149,11 @@ export function QuestionInput({ question, answer, onSave }: QuestionInputProps) 
   }
 
   return (
-    <Textarea
+    <DebouncedTextarea
       placeholder="Type your answer..."
       rows={4}
       value={(answer as string) ?? ''}
-      onChange={(e) => onSave(e.target.value)}
-      onBlur={(e) => { if (e.target.value.trim()) onSave(e.target.value); }}
+      onSave={onSave}
     />
   );
 }

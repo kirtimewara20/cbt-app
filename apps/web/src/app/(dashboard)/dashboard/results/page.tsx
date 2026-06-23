@@ -39,7 +39,7 @@ export default function ResultsPage() {
     mutationFn: (examId: string) => resultsApi.publish(accessToken!, examId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['results', selectedExam] });
-      toast({ title: 'Results published', variant: 'success' });
+      toast({ title: 'Results published', description: 'Ranks were calculated automatically.', variant: 'success' });
     },
   });
 

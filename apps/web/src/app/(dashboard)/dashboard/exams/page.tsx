@@ -20,6 +20,8 @@ import { toast } from '@/hooks/use-toast';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { DEFAULT_EXAM_TIMEZONE, localDateTimeToUtcIso } from '@cbt/shared';
+import { EXAM_TIMEZONE_OPTIONS, formatExamTimeRange } from '@/lib/exam-dates';
 import { FileText, Plus, Users, Clock, HelpCircle } from 'lucide-react';
 import { TableSkeleton } from '@/components/ui/skeleton';
 
@@ -30,6 +32,7 @@ type ExamItem = {
   status: string;
   startTime: string;
   endTime: string;
+  timezone?: string;
   sections?: { id: string; _count?: { questions: number } }[];
   _count?: { registrations: number; sessions: number; results: number };
 };
@@ -49,7 +52,7 @@ export default function ExamsPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; code: string } | null>(null);
   const [form, setForm] = useState({
     title: '', code: '', type: 'RECRUITMENT', durationMinutes: 30,
-    startTime: '', endTime: '',
+    startTime: '', endTime: '', timezone: DEFAULT_EXAM_TIMEZONE,
   });
 
   const { data, isLoading } = useQuery({
@@ -60,8 +63,12 @@ export default function ExamsPage() {
 
   const createMutation = useMutation({
     mutationFn: () => examsApi.create(accessToken!, {
-      ...form,
+      title: form.title,
+      code: form.code,
       type: form.type,
+      timezone: form.timezone,
+      startTime: localDateTimeToUtcIso(form.startTime, form.timezone),
+      endTime: localDateTimeToUtcIso(form.endTime, form.timezone),
       settings: { durationMinutes: form.durationMinutes, passingScore: 40, negativeMarking: true, shuffleQuestions: false },
       securityPolicy: { proctoringEnabled: false, fullscreen: true, blockCopyPaste: true },
       sections: [{ name: 'Section A', orderIndex: 1, durationMinutes: form.durationMinutes }],
@@ -69,7 +76,7 @@ export default function ExamsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exams'] });
       setShowCreate(false);
-      setForm({ title: '', code: '', type: 'RECRUITMENT', durationMinutes: 30, startTime: '', endTime: '' });
+      setForm({ title: '', code: '', type: 'RECRUITMENT', durationMinutes: 30, startTime: '', endTime: '', timezone: DEFAULT_EXAM_TIMEZONE });
       toast({ title: 'Exam created', description: 'Add questions and assign candidates before publishing.', variant: 'success' });
     },
     onError: (e: Error) => toast({ title: 'Failed to create exam', description: e.message, variant: 'destructive' }),
@@ -124,6 +131,19 @@ export default function ExamsPage() {
             <div className="space-y-2"><Label>Code</Label><Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="DEMO-2026" /></div>
             <div className="space-y-2"><Label>Start Time</Label><Input type="datetime-local" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} /></div>
             <div className="space-y-2"><Label>End Time</Label><Input type="datetime-local" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} /></div>
+            <div className="space-y-2">
+              <Label>Timezone</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={form.timezone}
+                onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+              >
+                {EXAM_TIMEZONE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">Start and end times are interpreted in this timezone.</p>
+            </div>
             <div className="space-y-2"><Label>Duration (minutes)</Label><Input type="number" value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: +e.target.value })} /></div>
             <div className="flex items-end">
               <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.title || !form.code || !form.startTime || !form.endTime}>
@@ -157,7 +177,10 @@ export default function ExamsPage() {
                     <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1"><HelpCircle className="h-3 w-3" />{qCount} question{qCount === 1 ? '' : 's'}</span>
                       <span className="flex items-center gap-1"><Users className="h-3 w-3" />{cCount} candidate{cCount === 1 ? '' : 's'}</span>
-                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(exam.startTime).toLocaleDateString()} — {new Date(exam.endTime).toLocaleDateString()}</span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {formatExamTimeRange(exam.startTime, exam.endTime, exam.timezone || DEFAULT_EXAM_TIMEZONE)}
+                      </span>
                     </div>
                     {exam.status === 'DRAFT' && !readyToPublish && (
                       <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">

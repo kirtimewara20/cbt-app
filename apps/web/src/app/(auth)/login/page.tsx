@@ -33,14 +33,14 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Wake Render free-tier API while the user reads the login form
+  // Wake Render free-tier API + DB while the user reads the login form
   useEffect(() => {
     const isLocal =
       window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const api = isLocal
       ? (process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://localhost:4000/api/v1')
       : '/api/v1';
-    fetch(`${api}/health`, { cache: 'no-store' }).catch(() => {});
+    fetch(`${api}/health/ready`, { cache: 'no-store' }).catch(() => {});
   }, []);
 
   function readCredentials(form: HTMLFormElement) {
@@ -57,7 +57,17 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await useAuthStore.getState().logout();
+      // Clear stale session in background — don't block login on cookie cleanup
+      const store = useAuthStore.getState();
+      if (store.isAuthenticated) {
+        useAuthStore.setState({
+          user: null,
+          accessToken: null,
+          refreshToken: null,
+          isAuthenticated: false,
+        });
+        import('@/lib/auth-session').then(({ clearAuthSession }) => clearAuthSession().catch(() => {}));
+      }
       const result = await authApi.login(credentials) as {
         mfaRequired?: boolean;
         mfaToken?: string;

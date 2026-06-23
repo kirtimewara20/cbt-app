@@ -53,6 +53,7 @@ export default function ExamStartPage() {
   const [fullscreenError, setFullscreenError] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saveStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const questionEnteredAt = useRef(Date.now());
 
   const examSocket = useExamSocket(session?.sessionId ?? null, !!session && !done);
 
@@ -96,15 +97,23 @@ export default function ExamStartPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, examId, router]);
 
+  useEffect(() => {
+    questionEnteredAt.current = Date.now();
+  }, [currentIndex]);
+
+  const getTimeSpentSeconds = () =>
+    Math.max(1, Math.floor((Date.now() - questionEnteredAt.current) / 1000));
+
   const saveAnswer = useCallback(async (questionId: string, value: string | string[]) => {
     if (!session || !accessToken) return;
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
     setSaveStatus('saving');
+    const timeSpentSeconds = getTimeSpentSeconds();
     const payload = {
       sessionId: session.sessionId,
       questionId,
       answer: { value },
-      timeSpentSeconds: 5,
+      timeSpentSeconds,
       markedForReview: review[questionId] || false,
     };
     try {
@@ -114,7 +123,7 @@ export default function ExamStartPage() {
         await examSessionApi.saveAnswer(accessToken, session.sessionId, {
           questionId,
           answer: { value },
-          timeSpentSeconds: 5,
+          timeSpentSeconds,
           markedForReview: review[questionId] || false,
         });
       }
@@ -126,7 +135,7 @@ export default function ExamStartPage() {
         await examSessionApi.saveAnswer(accessToken, session.sessionId, {
           questionId,
           answer: { value },
-          timeSpentSeconds: 5,
+          timeSpentSeconds,
           markedForReview: review[questionId] || false,
         });
         setSaveStatus('saved');
@@ -177,15 +186,26 @@ export default function ExamStartPage() {
       } catch {
         /* heartbeat retry on next interval */
       }
-    }, 10000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [session, accessToken, done, finishExam, examSocket]);
 
   useEffect(() => {
     if (done || !session) return;
-    const timer = setInterval(() => setTimeLeft((t) => Math.max(0, t - 1)), 1000);
+    const timer = setInterval(() => {
+      setTimeLeft((t) => {
+        const next = Math.max(0, t - 1);
+        return next;
+      });
+    }, 1000);
     return () => clearInterval(timer);
   }, [session, done]);
+
+  useEffect(() => {
+    if (done || !session || !accessToken || timeLeft > 0) return;
+    handleSubmit();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft, done, session, accessToken]);
 
   if (error) return (
     <div className="flex min-h-screen items-center justify-center">

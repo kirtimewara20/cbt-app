@@ -19,6 +19,10 @@ import { CertificateDialog } from '@/components/candidate/certificate-dialog';
 import type { CertificateData } from '@/lib/certificate';
 import { toast } from '@/hooks/use-toast';
 import { getExamStatus, formatCountdown } from '@/lib/exam-status';
+import { DEFAULT_EXAM_TIMEZONE } from '@cbt/shared';
+import { formatExamTimeRange } from '@/lib/exam-dates';
+import { formatRankLabel } from '@/lib/rank';
+import { useNow } from '@/hooks/use-now';
 import {
   LogOut, Play, Clock, Award, FileText, Moon, Sun, Shield, Download, IdCard,
   Search, CheckCircle2, AlertCircle, BookOpen, Wifi, Monitor, User,
@@ -32,7 +36,7 @@ type ExamRegistration = {
   examId: string;
   exam: {
     title: string; code: string; status: string;
-    startTime: string; endTime: string;
+    startTime: string; endTime: string; timezone?: string;
     settings?: { durationMinutes: number };
   };
   sessions?: { status: string }[];
@@ -82,11 +86,13 @@ export default function MyExamsPage() {
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<Tab>('exams');
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
+  const now = useNow(15_000);
 
   const { data: exams, isLoading: examsLoading } = useQuery({
     queryKey: ['my-exams'],
     queryFn: () => examsApi.myExams(accessToken!),
     enabled: !!accessToken,
+    refetchInterval: 60_000,
   });
 
   const { data: results } = useQuery({
@@ -104,7 +110,8 @@ export default function MyExamsPage() {
   const examList = (exams as ExamRegistration[]) || [];
   const resultList = (results as { items?: {
     id: string; totalScore: number; maxScore: number; percentage: number;
-    published: boolean; exam: { title: string; code: string };
+    rank?: number | null; percentile?: number | null; totalCandidates?: number | null;
+    published: boolean; exam: { title: string; code: string; settings?: { passingScore?: number } };
   }[] })?.items || [];
 
   const filteredExams = examList.filter((reg) => {
@@ -122,8 +129,12 @@ export default function MyExamsPage() {
     try {
       const card = await candidatesApi.admitCard(accessToken, examId) as AdmitCard;
       setAdmitCard(card);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      toast({
+        title: 'Admit card unavailable',
+        description: e instanceof Error ? e.message : 'Could not load admit card for this exam.',
+        variant: 'destructive',
+      });
     } finally {
       setLoadingAdmit(null);
     }
@@ -262,7 +273,9 @@ export default function MyExamsPage() {
                 {examsLoading ? <TableSkeleton rows={3} cols={1} /> : (
                   <>
                     {filteredExams.map((reg) => {
+                      void now;
                       const status = getExamStatus(reg);
+                      const tz = reg.exam.timezone || DEFAULT_EXAM_TIMEZONE;
                       const countdown = status.phase === 'upcoming'
                         ? formatCountdown(new Date(reg.exam.startTime).getTime())
                         : null;
@@ -302,9 +315,7 @@ export default function MyExamsPage() {
                                     {reg.exam.settings?.durationMinutes ?? 30} min
                                   </span>
                                   <span>
-                                    {new Date(reg.exam.startTime).toLocaleDateString(undefined, {
-                                      weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                                    })}
+                                    {formatExamTimeRange(reg.exam.startTime, reg.exam.endTime, tz)}
                                   </span>
                                 </div>
                               </div>
@@ -350,7 +361,9 @@ export default function MyExamsPage() {
               <section className="space-y-3">
                 {resultList.map((r) => {
                   const pct = Math.min(100, r.percentage);
-                  const passed = pct >= 40;
+                  const passingScore = (r.exam.settings?.passingScore as number | undefined) ?? 40;
+                  const passed = pct >= passingScore;
+                  const rankLabel = formatRankLabel(r.rank, r.totalCandidates);
                   return (
                     <Card key={r.id} className="surface-card">
                       <CardContent className="p-6">
@@ -365,6 +378,9 @@ export default function MyExamsPage() {
                             <div>
                               <p className="font-bold">{r.exam.title}</p>
                               <p className="text-sm text-muted-foreground">{r.exam.code}</p>
+                              {rankLabel && (
+                                <p className="mt-1 text-xs font-semibold text-primary">{rankLabel}</p>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-4">

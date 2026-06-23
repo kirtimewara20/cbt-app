@@ -22,7 +22,7 @@ services:
       pnpm --filter @cbt/api exec prisma generate &&
       pnpm --filter @cbt/api build
     startCommand: bash scripts/render-start-api.sh
-    healthCheckPath: /api/v1/health
+    healthCheckPath: /api/v1/health/ready
     envVars:
       - key: NODE_ENV
         value: production

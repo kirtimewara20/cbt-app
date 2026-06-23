@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExamType } from '@prisma/client';
+import { DEFAULT_EXAM_TIMEZONE, parseExamDateTime } from '@cbt/shared';
 import { resolveCandidateId } from '../../common/utils/candidate.util';
 import { parsePage, parseLimit } from '../../common/utils/pagination.util';
 @Injectable()
@@ -28,9 +29,9 @@ export class ExamsService {
         title: data.title,
         code: data.code,
         type: data.type,
-        startTime: new Date(data.startTime),
-        endTime: new Date(data.endTime),
-        timezone: data.timezone || 'UTC',
+        startTime: parseExamDateTime(data.startTime, data.timezone || DEFAULT_EXAM_TIMEZONE),
+        endTime: parseExamDateTime(data.endTime, data.timezone || DEFAULT_EXAM_TIMEZONE),
+        timezone: data.timezone || DEFAULT_EXAM_TIMEZONE,
         settings: (data.settings || {}) as never,
         securityPolicy: (data.securityPolicy || {}) as never,
         createdById: userId,
@@ -255,5 +256,43 @@ export class ExamsService {
       },
       orderBy: { registeredAt: 'desc' },
     });
+  }
+
+  /** Safe exam metadata for candidates — no answers, registration required. */
+  async getInstructionsForCandidate(examId: string, userId: string) {
+    const candidateId = await resolveCandidateId(this.prisma, userId);
+    const registration = await this.prisma.examRegistration.findUnique({
+      where: { examId_candidateId: { examId, candidateId } },
+      include: {
+        exam: {
+          select: {
+            id: true,
+            title: true,
+            code: true,
+            status: true,
+            startTime: true,
+            endTime: true,
+            timezone: true,
+            settings: true,
+            securityPolicy: true,
+          },
+        },
+        sessions: {
+          where: { candidateId },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { id: true, status: true },
+        },
+      },
+    });
+    if (!registration) throw new NotFoundException('Not registered for this exam');
+
+    return {
+      ...registration.exam,
+      registration: {
+        id: registration.id,
+        sessions: registration.sessions,
+      },
+    };
   }
 }

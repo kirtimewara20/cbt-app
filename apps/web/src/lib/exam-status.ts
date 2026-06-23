@@ -18,6 +18,11 @@ export function getExamStatus(reg: ExamRegistration): ExamStatusInfo {
     return { label: 'Submitted', variant: 'success', actionLabel: 'Submitted', actionDisabled: true, phase: 'submitted' };
   }
 
+  // Active session takes priority — candidate can resume even past exam window end
+  if (session?.status === 'IN_PROGRESS') {
+    return { label: 'In Progress', variant: 'warning', actionLabel: 'Resume Exam', actionDisabled: false, phase: 'in_progress' };
+  }
+
   const now = Date.now();
   const start = new Date(reg.exam.startTime).getTime();
   const end = new Date(reg.exam.endTime).getTime();
@@ -30,9 +35,6 @@ export function getExamStatus(reg: ExamRegistration): ExamStatusInfo {
   }
   if (!['PUBLISHED', 'IN_PROGRESS'].includes(reg.exam.status)) {
     return { label: 'Unavailable', variant: 'secondary', actionLabel: 'Unavailable', actionDisabled: true, phase: 'unavailable' };
-  }
-  if (session?.status === 'IN_PROGRESS') {
-    return { label: 'In Progress', variant: 'warning', actionLabel: 'Resume Exam', actionDisabled: false, phase: 'in_progress' };
   }
   return { label: 'Available Now', variant: 'success', actionLabel: 'Start Exam', actionDisabled: false, phase: 'available' };
 }

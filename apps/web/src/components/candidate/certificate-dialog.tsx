@@ -8,6 +8,7 @@ import { Logo } from '@/components/layout/logo';
 import { Award, Download, Printer } from 'lucide-react';
 import type { CertificateData } from '@/lib/certificate';
 import { downloadCertificateHtml, printCertificate } from '@/lib/certificate';
+import { formatRankLabel } from '@/lib/rank';
 
 interface CertificateDialogProps {
   certificate: CertificateData | null;
@@ -16,7 +17,9 @@ interface CertificateDialogProps {
 }
 
 export function CertificateDialog({ certificate, loading, onClose }: CertificateDialogProps) {
-  const passed = certificate ? certificate.percentage >= 40 : false;
+  const passed = certificate
+    ? certificate.percentage >= (certificate.passingScore ?? 40)
+    : false;
   const issued = certificate
     ? new Date(certificate.issuedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
     : '';
@@ -72,8 +75,7 @@ export function CertificateDialog({ certificate, loading, onClose }: Certificate
                 </p>
                 {certificate.rank != null && (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Rank #{certificate.rank}
-                    {certificate.percentile != null && ` · Top ${(100 - certificate.percentile).toFixed(0)}%`}
+                    {formatRankLabel(certificate.rank, certificate.totalCandidates)}
                   </p>
                 )}
               </div>

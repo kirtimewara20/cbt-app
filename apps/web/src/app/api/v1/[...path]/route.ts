@@ -1,36 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchWithColdStartRetry } from '@/lib/cold-start-retry';
 
 const API_BASE = (process.env.API_PROXY_URL || 'https://cbt-api-ktkr.onrender.com').replace(/\/$/, '');
-const COLD_START_RETRY_MS = 15_000;
-const COLD_START_MAX_ATTEMPTS = 3;
-
-function isRetryableStatus(status: number, raw: string): boolean {
-  if (status >= 502) return true;
-  const trimmed = raw.trimStart();
-  return trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html');
-}
-
-async function fetchUpstream(
-  targetUrl: string,
-  init: RequestInit,
-): Promise<Response> {
-  let lastResponse: Response | null = null;
-  for (let attempt = 0; attempt < COLD_START_MAX_ATTEMPTS; attempt++) {
-    try {
-      const response = await fetch(targetUrl, { ...init, cache: 'no-store' });
-      lastResponse = response;
-      if (response.ok) return response;
-      const raw = await response.clone().text();
-      if (!isRetryableStatus(response.status, raw) || attempt === COLD_START_MAX_ATTEMPTS - 1) {
-        return response;
-      }
-    } catch {
-      if (attempt === COLD_START_MAX_ATTEMPTS - 1) throw new Error('upstream unavailable');
-    }
-    await new Promise((resolve) => setTimeout(resolve, COLD_START_RETRY_MS));
-  }
-  return lastResponse!;
-}
 
 async function proxyRequest(req: NextRequest, pathSegments: string[]) {
   const path = pathSegments.join('/');
@@ -48,7 +19,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
 
   let upstream: Response;
   try {
-    upstream = await fetchUpstream(targetUrl, {
+    upstream = await fetchWithColdStartRetry(targetUrl, {
       method: req.method,
       headers,
       body,

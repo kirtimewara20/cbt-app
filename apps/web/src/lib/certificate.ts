@@ -10,6 +10,8 @@ export type CertificateData = {
   percentage: number;
   rank: number | null;
   percentile: number | null;
+  totalCandidates?: number | null;
+  passingScore?: number;
   issuedAt: string | Date;
   verificationUrl: string;
 };
@@ -30,14 +32,16 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+import { formatRankLabel } from './rank';
+
 export function generateCertificateHtml(cert: CertificateData, origin?: string): string {
   const issued = formatDate(cert.issuedAt);
   const verifyUrl = cert.verificationUrl.startsWith('http')
     ? cert.verificationUrl
     : `${origin || ''}${cert.verificationUrl}`;
-  const passed = cert.percentage >= 40;
-  const rankLine = cert.rank
-    ? `<p class="meta">Rank: <strong>#${cert.rank}</strong>${cert.percentile != null ? ` · Top ${(100 - cert.percentile).toFixed(0)}%` : ''}</p>`
+  const passed = cert.percentage >= (cert.passingScore ?? 40);
+  const rankLine = cert.rank != null
+    ? `<p class="meta">${escapeHtml(formatRankLabel(cert.rank, cert.totalCandidates) ?? '')}</p>`
     : '';
 
   return `<!DOCTYPE html>

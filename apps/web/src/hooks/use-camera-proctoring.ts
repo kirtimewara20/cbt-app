@@ -9,6 +9,8 @@ interface UseCameraProctoringOptions {
   intervalMs?: number;
 }
 
+type ProctoringStatus = { riskScore: number; faceDetected?: boolean };
+
 export function useCameraProctoring({ sessionId, enabled = true, intervalMs = 3000 }: UseCameraProctoringOptions) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -56,22 +58,27 @@ export function useCameraProctoring({ sessionId, enabled = true, intervalMs = 30
     const socket = getProctoringSocket();
     socket.connect();
 
-    socket.on('proctoring:status', (data: { riskScore: number; faceDetected?: boolean }) => {
-      setRiskScore(data.riskScore);
-      if (data.faceDetected !== undefined) setFaceDetected(data.faceDetected);
-    });
-
     const interval = setInterval(() => {
       const thumbnail = captureFrame();
-      if (thumbnail && socket.connected) {
-        socket.emit('proctoring:frame', { sessionId, thumbnail, metadata: { ts: Date.now() } });
-      }
+      if (!thumbnail || !socket.connected) return;
+
+      socket.emit(
+        'proctoring:frame',
+        { sessionId, thumbnail, metadata: { ts: Date.now() } },
+        (response: { event?: string; data?: ProctoringStatus } | undefined) => {
+          if (response?.event === 'proctoring:status' && response.data) {
+            setRiskScore(response.data.riskScore);
+            if (response.data.faceDetected !== undefined) {
+              setFaceDetected(response.data.faceDetected);
+            }
+          }
+        },
+      );
     }, intervalMs);
 
     return () => {
       clearInterval(interval);
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      socket.off('proctoring:status');
     };
   }, [enabled, sessionId, intervalMs, startCamera, captureFrame]);
 
