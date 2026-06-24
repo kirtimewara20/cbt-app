@@ -1,20 +1,24 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { auditApi } from '@/lib/api';
 import { useRequireAuth } from '@/hooks/use-auth';
+import { PaginationControls } from '@/components/layout/pagination';
+import { TableSkeleton } from '@/components/ui/skeleton';
 
 export default function AuditPage() {
   const { accessToken } = useRequireAuth(true);
+  const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['audit'],
-    queryFn: () => auditApi.list(accessToken!),
+    queryKey: ['audit', page],
+    queryFn: () => auditApi.list(accessToken!, page),
     enabled: !!accessToken,
   });
 
-  if (isLoading) return <div>Loading audit logs...</div>;
+  if (isLoading) return <TableSkeleton rows={8} cols={5} />;
 
   return (
     <div className="space-y-6">
@@ -38,6 +42,12 @@ export default function AuditPage() {
               ))}
             </tbody>
           </table>
+          <PaginationControls
+            page={page}
+            totalPages={data?.totalPages ?? 1}
+            total={data?.total}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
     </div>

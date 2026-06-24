@@ -21,7 +21,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { DEFAULT_EXAM_TIMEZONE, localDateTimeToUtcIso } from '@cbt/shared';
-import { EXAM_TIMEZONE_OPTIONS, formatExamTimeRange } from '@/lib/exam-dates';
+import { EXAM_TIMEZONE_OPTIONS, formatExamTimeRange, utcIsoToLocalDateTimeInput } from '@/lib/exam-dates';
 import { FileText, Plus, Users, Clock, HelpCircle } from 'lucide-react';
 import { TableSkeleton } from '@/components/ui/skeleton';
 
@@ -50,6 +50,8 @@ export default function ExamsPage() {
   const [manageQuestionsDialog, setManageQuestionsDialog] = useState<{ examId: string; title: string } | null>(null);
   const [candidatesDialog, setCandidatesDialog] = useState<{ examId: string; title: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; code: string } | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<ExamItem | null>(null);
+  const [scheduleForm, setScheduleForm] = useState({ startTime: '', endTime: '', timezone: DEFAULT_EXAM_TIMEZONE });
   const [form, setForm] = useState({
     title: '', code: '', type: 'RECRUITMENT', durationMinutes: 30,
     startTime: '', endTime: '', timezone: DEFAULT_EXAM_TIMEZONE,
@@ -101,6 +103,30 @@ export default function ExamsPage() {
     onError: (e: Error) => toast({ title: 'Cannot delete exam', description: e.message, variant: 'destructive' }),
   });
 
+  const scheduleMutation = useMutation({
+    mutationFn: () => examsApi.updateSchedule(accessToken!, scheduleTarget!.id, {
+      startTime: localDateTimeToUtcIso(scheduleForm.startTime, scheduleForm.timezone),
+      endTime: localDateTimeToUtcIso(scheduleForm.endTime, scheduleForm.timezone),
+      timezone: scheduleForm.timezone,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exams'] });
+      setScheduleTarget(null);
+      toast({ title: 'Schedule updated', variant: 'success' });
+    },
+    onError: (e: Error) => toast({ title: 'Update failed', description: e.message, variant: 'destructive' }),
+  });
+
+  function openScheduleEdit(exam: ExamItem) {
+    const tz = exam.timezone || DEFAULT_EXAM_TIMEZONE;
+    setScheduleForm({
+      startTime: utcIsoToLocalDateTimeInput(exam.startTime, tz),
+      endTime: utcIsoToLocalDateTimeInput(exam.endTime, tz),
+      timezone: tz,
+    });
+    setScheduleTarget(exam);
+  }
+
   function canDeleteExam(exam: ExamItem) {
     if (exam.status === 'COMPLETED') return false;
     if ((exam._count?.sessions ?? 0) > 0) return false;
@@ -115,10 +141,12 @@ export default function ExamsPage() {
   return (
     <div className="space-y-8">
       <PageHeader title="Exams" description="Create, publish, and manage your examination lifecycle" badge="Core">
+        {can(Permission.EXAM_CREATE) && (
         <Button onClick={() => setShowCreate(!showCreate)}>
           <Plus className="mr-2 h-4 w-4" />
           {showCreate ? 'Cancel' : 'Create Exam'}
         </Button>
+        )}
       </PageHeader>
 
       {showCreate && (
@@ -194,6 +222,12 @@ export default function ExamsPage() {
                 <div className="flex flex-wrap gap-2">
                   {exam.status === 'DRAFT' && (
                     <>
+                      {can(Permission.EXAM_UPDATE) && (
+                        <Button size="sm" variant="outline" onClick={() => openScheduleEdit(exam)}>
+                          Edit Schedule
+                        </Button>
+                      )}
+                      {can(Permission.EXAM_UPDATE) && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -202,7 +236,8 @@ export default function ExamsPage() {
                       >
                         Add Questions
                       </Button>
-                      {qCount > 0 && (
+                      )}
+                      {qCount > 0 && can(Permission.EXAM_UPDATE) && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -211,6 +246,7 @@ export default function ExamsPage() {
                           Manage Questions
                         </Button>
                       )}
+                      {can(Permission.EXAM_ASSIGN_CANDIDATES) && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -218,6 +254,8 @@ export default function ExamsPage() {
                       >
                         Assign Candidates
                       </Button>
+                      )}
+                      {can(Permission.EXAM_PUBLISH) && (
                       <Button
                         size="sm"
                         onClick={() => publishMutation.mutate(exam.id)}
@@ -225,6 +263,7 @@ export default function ExamsPage() {
                       >
                         Publish
                       </Button>
+                      )}
                     </>
                   )}
                   {can(Permission.EXAM_DELETE) && (
@@ -285,6 +324,48 @@ export default function ExamsPage() {
           onOpenChange={(open) => !open && setCandidatesDialog(null)}
         />
       )}
+
+      <Dialog open={!!scheduleTarget} onOpenChange={(open) => !open && setScheduleTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit exam schedule</DialogTitle>
+            <DialogDescription>
+              Update start/end times for <span className="font-medium">{scheduleTarget?.title}</span>. Times use the selected timezone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="space-y-2">
+              <Label>Start Time</Label>
+              <Input type="datetime-local" value={scheduleForm.startTime} onChange={(e) => setScheduleForm({ ...scheduleForm, startTime: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>End Time</Label>
+              <Input type="datetime-local" value={scheduleForm.endTime} onChange={(e) => setScheduleForm({ ...scheduleForm, endTime: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>Timezone</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={scheduleForm.timezone}
+                onChange={(e) => setScheduleForm({ ...scheduleForm, timezone: e.target.value })}
+              >
+                {EXAM_TIMEZONE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setScheduleTarget(null)}>Cancel</Button>
+            <Button
+              disabled={scheduleMutation.isPending || !scheduleForm.startTime || !scheduleForm.endTime}
+              onClick={() => scheduleMutation.mutate()}
+            >
+              {scheduleMutation.isPending ? 'Saving...' : 'Save schedule'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent>

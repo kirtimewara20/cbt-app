@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { parsePage, parseLimit } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class ResultsService {
+  private readonly subjectiveTypes = ['SUBJECTIVE', 'CASE_STUDY', 'CODING', 'AUDIO', 'VIDEO'];
+
   constructor(private prisma: PrismaService) {}
 
   async evaluateSession(sessionId: string) {
@@ -31,7 +33,16 @@ export class ResultsService {
 
     for (const response of session.responses) {
       const version = response.question.versions[0];
-      if (!version || !version.correctAnswer || !response.answer) continue;
+      if (!version) continue;
+
+      if (this.subjectiveTypes.includes(response.question.type)) {
+        if (response.marksAwarded != null) {
+          totalScore += response.marksAwarded;
+        }
+        continue;
+      }
+
+      if (!version.correctAnswer || !response.answer) continue;
 
       const { isCorrect, marks } = this.gradeAnswer(
         response.question.type,
@@ -49,6 +60,9 @@ export class ResultsService {
     }
 
     const percentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
+    const hasUngraded = session.responses.some(
+      (r) => this.subjectiveTypes.includes(r.question.type) && r.marksAwarded == null && r.answer,
+    );
 
     return this.prisma.examResult.upsert({
       where: { sessionId },
@@ -59,13 +73,13 @@ export class ResultsService {
         totalScore,
         maxScore,
         percentage,
-        evaluationStatus: 'AUTO_EVALUATED',
+        evaluationStatus: hasUngraded ? 'MANUAL_REVIEW' : 'AUTO_EVALUATED',
       },
       update: {
         totalScore,
         maxScore,
         percentage,
-        evaluationStatus: 'AUTO_EVALUATED',
+        evaluationStatus: hasUngraded ? 'MANUAL_REVIEW' : 'AUTO_EVALUATED',
       },
     });
   }
@@ -268,5 +282,87 @@ export class ResultsService {
       issuedAt: result.publishedAt ?? result.createdAt,
       verificationUrl: `/verify/certificate/${result.id}`,
     };
+  }
+
+  async verifyCertificate(resultId: string) {
+    const result = await this.prisma.examResult.findFirst({
+      where: { id: resultId, published: true },
+      include: {
+        exam: { select: { title: true, code: true, settings: true } },
+        candidate: { include: { user: { select: { firstName: true, lastName: true } } } },
+      },
+    });
+    if (!result) throw new NotFoundException('Certificate not found or not published');
+
+    const settings = (result.exam.settings || {}) as Record<string, unknown>;
+    const passingScore = (settings.passingScore as number) ?? 40;
+
+    return {
+      valid: true,
+      certificateId: result.id,
+      certificateNumber: `CERT-${result.exam.code}-${result.id.slice(0, 8).toUpperCase()}`,
+      candidateName: `${result.candidate.user.firstName} ${result.candidate.user.lastName}`,
+      examTitle: result.exam.title,
+      examCode: result.exam.code,
+      totalScore: result.totalScore,
+      maxScore: result.maxScore,
+      percentage: result.percentage,
+      passingScore,
+      passed: result.percentage >= passingScore,
+      rank: result.rank,
+      issuedAt: result.publishedAt ?? result.createdAt,
+    };
+  }
+
+  async getSubjectiveResponses(examId: string) {
+    return this.prisma.sessionResponse.findMany({
+      where: {
+        session: { examId, status: { in: ['SUBMITTED', 'AUTO_SUBMITTED'] } },
+        question: { type: { in: this.subjectiveTypes as never } },
+      },
+      include: {
+        question: {
+          include: { versions: { take: 1, orderBy: { versionNumber: 'desc' } } },
+        },
+        session: {
+          include: {
+            candidate: {
+              include: { user: { select: { firstName: true, lastName: true, email: true } } },
+            },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'asc' },
+    });
+  }
+
+  async gradeResponse(sessionId: string, questionId: string, marksAwarded: number) {
+    const response = await this.prisma.sessionResponse.findUnique({
+      where: { sessionId_questionId: { sessionId, questionId } },
+      include: { question: true },
+    });
+    if (!response) throw new NotFoundException('Response not found');
+    if (!this.subjectiveTypes.includes(response.question.type)) {
+      throw new BadRequestException('Only subjective responses can be manually graded');
+    }
+
+    const version = await this.prisma.questionVersion.findFirst({
+      where: { questionId },
+      orderBy: { versionNumber: 'desc' },
+    });
+    const maxMarks = version?.marks ?? 0;
+    if (marksAwarded < 0 || marksAwarded > maxMarks) {
+      throw new BadRequestException(`Marks must be between 0 and ${maxMarks}`);
+    }
+
+    await this.prisma.sessionResponse.update({
+      where: { sessionId_questionId: { sessionId, questionId } },
+      data: {
+        marksAwarded,
+        isCorrect: marksAwarded > 0,
+      },
+    });
+
+    return this.evaluateSession(sessionId);
   }
 }

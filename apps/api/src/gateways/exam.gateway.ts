@@ -19,11 +19,16 @@ import { Server, Socket } from 'socket.io';
 import { ExamEngineService } from '../modules/exam-engine/exam-engine.service';
 
 import { WsAuthService } from '../common/utils/ws-auth.service';
-import { getPrimaryCorsOrigin } from '../common/utils/cors-origins';
+import { isOriginAllowed } from '../common/utils/cors-origins';
 
 @WebSocketGateway({
   namespace: '/exam',
-  cors: { origin: getPrimaryCorsOrigin(), credentials: true },
+  cors: {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      callback(null, isOriginAllowed(origin));
+    },
+    credentials: true,
+  },
 })
 export class ExamGateway implements OnGatewayConnection {
   @WebSocketServer()

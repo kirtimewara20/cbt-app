@@ -32,7 +32,7 @@ export function ExamAssignCandidatesDialog({
 
   const { data: candidates, isLoading: candidatesLoading } = useQuery({
     queryKey: ['candidates'],
-    queryFn: () => candidatesApi.list(accessToken, 1, ''),
+    queryFn: () => candidatesApi.list(accessToken, 1, '', 200),
     enabled: open && !!accessToken,
   });
 

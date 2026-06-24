@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { normalizeRoles } from '@/lib/roles';
+import { getSafeRedirectPath } from '@/lib/safe-redirect';
 import { Logo } from '@/components/layout/logo';
 import { Shield, BarChart3, Users, Lock, Sparkles, Eye } from 'lucide-react';
 
@@ -27,6 +28,7 @@ const stats = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
   const setAuth = useAuthStore((s) => s.setAuth);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,6 +37,8 @@ export default function LoginPage() {
 
   // Wake Render free-tier API + DB while the user reads the login form
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setRedirectTo(getSafeRedirectPath(params.get('redirect')));
     const isLocal =
       window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const api = isLocal
@@ -83,7 +87,7 @@ export default function LoginPage() {
       if (result.accessToken && result.user) {
         const roles = normalizeRoles(result.user.roles);
         const isAdminUser = await setAuth({ ...result.user, roles } as never, result.accessToken, result.refreshToken || '');
-        router.replace(isAdminUser ? '/dashboard' : '/my-exams');
+        router.replace(redirectTo ?? (isAdminUser ? '/dashboard' : '/my-exams'));
         return;
       }
       setError('Login failed. Please try again.');
@@ -211,6 +215,7 @@ export default function LoginPage() {
             </Button>
           </form>
 
+          {process.env.NODE_ENV !== 'production' && (
           <div className="rounded-xl border border-border/60 bg-card/50 p-5 backdrop-blur-sm">
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">Demo Credentials</p>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -227,6 +232,7 @@ export default function LoginPage() {
               Candidate: <span className="font-semibold text-foreground">Candidate@123</span>
             </p>
           </div>
+          )}
 
           <p className="text-center text-sm text-muted-foreground">
             <Link href="/forgot-password" className="font-semibold text-primary hover:underline">Forgot password?</Link>

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Query, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ExamsService } from './exams.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -70,6 +70,17 @@ export class ExamsController {
   @RequirePermissions(Permission.EXAM_PUBLISH)
   publish(@Param('id') id: string, @CurrentUser('tenantId') tenantId: string) {
     return this.examsService.publish(id, tenantId);
+  }
+
+  @Patch(':id/schedule')
+  @RequirePermissions(Permission.EXAM_UPDATE)
+  @ApiOperation({ summary: 'Update exam schedule and timezone' })
+  updateSchedule(
+    @Param('id') id: string,
+    @CurrentUser('tenantId') tenantId: string,
+    @Body() body: { startTime: string; endTime: string; timezone?: string },
+  ) {
+    return this.examsService.updateSchedule(id, tenantId, body);
   }
 
   @Post(':id/candidates')

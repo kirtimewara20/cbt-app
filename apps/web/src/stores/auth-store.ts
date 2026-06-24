@@ -27,7 +27,7 @@ export const useAuthStore = create<AuthState>()(
       setHasHydrated: (value) => set({ _hasHydrated: value }),
       setAuth: async (user, accessToken, refreshToken) => {
         const roles = normalizeRoles(user.roles);
-        const isAdminUser = await syncAuthSession(roles);
+        const isAdminUser = await syncAuthSession(accessToken);
         set({
           user: { ...user, roles: roles as AuthUser['roles'] },
           accessToken,
@@ -57,8 +57,8 @@ export const useAuthStore = create<AuthState>()(
 
 export async function syncSessionFromStore() {
   const state = useAuthStore.getState();
-  if (state.isAuthenticated && state.user?.roles) {
-    return syncAuthSession(state.user.roles);
+  if (state.isAuthenticated && state.accessToken) {
+    return syncAuthSession(state.accessToken);
   }
   if (typeof document !== 'undefined' && document.cookie.includes('cbt-auth=1')) {
     return false;

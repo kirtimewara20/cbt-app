@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { examsApi, proctoringApi } from '@/lib/api';
 import { useRequireAuth } from '@/hooks/use-auth';
+import { usePermissions } from '@/hooks/use-permissions';
+import { Permission } from '@cbt/shared';
 import { toast } from '@/hooks/use-toast';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatCard } from '@/components/layout/stat-card';
@@ -29,6 +31,7 @@ type RiskPatch = {
 
 export default function MonitoringPage() {
   const { accessToken } = useRequireAuth(true);
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const [examId, setExamId] = useState('');
   const [liveAlerts, setLiveAlerts] = useState<{ sessionId: string; type: string; severity: string; timestamp: string }[]>([]);
@@ -156,19 +159,21 @@ type LiveMonitoringData = {
                   </div>
                   <p className="text-muted-foreground">Violations: <span className="font-semibold text-foreground">{c.recentViolations}</span></p>
                   <div className="flex flex-wrap gap-2">
-                    {c.status === 'IN_PROGRESS' && (
+                    {can(Permission.PROCTORING_INTERVENE) && c.status === 'IN_PROGRESS' && (
                       <Button size="sm" variant="outline" onClick={() => interveneMutation.mutate({ sessionId: c.sessionId, type: 'PAUSE' })}>
                         <Pause className="mr-1 h-3 w-3" /> Pause
                       </Button>
                     )}
-                    {c.status === 'PAUSED' && (
+                    {can(Permission.PROCTORING_INTERVENE) && c.status === 'PAUSED' && (
                       <Button size="sm" variant="outline" onClick={() => interveneMutation.mutate({ sessionId: c.sessionId, type: 'RESUME' })}>
                         <Play className="mr-1 h-3 w-3" /> Resume
                       </Button>
                     )}
+                    {can(Permission.PROCTORING_TERMINATE) && (
                     <Button size="sm" variant="destructive" onClick={() => interveneMutation.mutate({ sessionId: c.sessionId, type: 'TERMINATE', message: 'Proctor terminated session' })}>
                       <XCircle className="mr-1 h-3 w-3" /> Terminate
                     </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>

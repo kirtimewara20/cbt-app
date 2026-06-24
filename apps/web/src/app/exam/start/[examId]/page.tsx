@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { examSessionApi } from '@/lib/api';
+import { useRequireCandidate } from '@/hooks/use-auth';
 import { useAuthStore } from '@/stores/auth-store';
 import { useExamSocket } from '@/hooks/use-exam-socket';
 import { useExamSecurity } from '@/hooks/use-exam-security';
@@ -31,7 +32,7 @@ export default function ExamStartPage() {
   const params = useParams();
   const examId = params.examId as string;
   const router = useRouter();
-  const { accessToken, user } = useAuthStore();
+  const { accessToken, user, ready } = useRequireCandidate();
   const [session, setSession] = useState<{
     sessionId: string;
     questions: Question[];
@@ -74,7 +75,7 @@ export default function ExamStartPage() {
   });
 
   useEffect(() => {
-    if (!accessToken) { router.push('/login'); return; }
+    if (!ready || !accessToken) return;
     examSessionApi.start(accessToken, examId)
       .then(async (data) => {
         const d = data as typeof session;
@@ -95,7 +96,7 @@ export default function ExamStartPage() {
       })
       .catch((e) => setError(e.message));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, examId, router]);
+  }, [accessToken, examId, ready]);
 
   useEffect(() => {
     questionEnteredAt.current = Date.now();
@@ -207,6 +208,7 @@ export default function ExamStartPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, done, session, accessToken]);
 
+  if (!ready) return <div className="flex min-h-screen items-center justify-center">Loading...</div>;
   if (error) return (
     <div className="flex min-h-screen items-center justify-center">
       <Card className="p-6"><p className="text-destructive">{error}</p><Button className="mt-4" onClick={() => router.push('/my-exams')}>Back</Button></Card>

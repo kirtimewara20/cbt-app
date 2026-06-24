@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { examsApi, resultsApi, candidatesApi } from '@/lib/api';
+import { examsApi, resultsApi, candidatesApi, authApi } from '@/lib/api';
 import { useRequireCandidate } from '@/hooks/use-auth';
 import { useAuthStore } from '@/stores/auth-store';
 import { isAdmin, normalizeRoles } from '@/lib/roles';
@@ -15,6 +15,7 @@ import { Logo } from '@/components/layout/logo';
 import { StatCard } from '@/components/layout/stat-card';
 import { EmptyState } from '@/components/layout/data-table';
 import { AdmitCardDialog, type AdmitCard } from '@/components/candidate/admit-card-dialog';
+import { KycSubmitCard } from '@/components/candidate/kyc-submit-card';
 import { CertificateDialog } from '@/components/candidate/certificate-dialog';
 import type { CertificateData } from '@/lib/certificate';
 import { toast } from '@/hooks/use-toast';
@@ -182,7 +183,12 @@ export default function MyExamsPage() {
                 )}
               </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={async () => { await logout(); window.location.href = '/login'; }}>
+            <Button variant="ghost" size="sm" onClick={async () => {
+              const token = useAuthStore.getState().accessToken;
+              if (token) await authApi.logout(token).catch(() => {});
+              await logout();
+              window.location.href = '/login';
+            }}>
               <LogOut className="mr-2 h-4 w-4" /> Logout
             </Button>
           </div>
@@ -427,6 +433,9 @@ export default function MyExamsPage() {
           </div>
 
           <aside className="space-y-4">
+            {accessToken && profile && (
+              <KycSubmitCard accessToken={accessToken} kycStatus={profile.kycStatus} />
+            )}
             <Card className="surface-card">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-bold">

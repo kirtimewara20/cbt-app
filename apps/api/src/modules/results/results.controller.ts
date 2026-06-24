@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ResultsService } from './results.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { Public } from '../../common/decorators/permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Permission } from '@cbt/shared';
 
@@ -14,6 +15,13 @@ import { Permission } from '@cbt/shared';
 @ApiBearerAuth()
 export class ResultsController {
   constructor(private resultsService: ResultsService) {}
+
+  @Get('verify/:resultId')
+  @Public()
+  @ApiOperation({ summary: 'Public certificate verification' })
+  verifyCertificate(@Param('resultId') resultId: string) {
+    return this.resultsService.verifyCertificate(resultId);
+  }
 
   @Get('my')
   @RequirePermissions(Permission.RESULT_READ)
@@ -48,6 +56,22 @@ export class ResultsController {
   @RequirePermissions(Permission.RESULT_PUBLISH)
   publish(@Param('examId') examId: string) {
     return this.resultsService.publishResults(examId);
+  }
+
+  @Get('exam/:examId/subjective')
+  @RequirePermissions(Permission.RESULT_EVALUATE)
+  getSubjectiveResponses(@Param('examId') examId: string) {
+    return this.resultsService.getSubjectiveResponses(examId);
+  }
+
+  @Patch('grade/:sessionId/:questionId')
+  @RequirePermissions(Permission.RESULT_EVALUATE)
+  gradeResponse(
+    @Param('sessionId') sessionId: string,
+    @Param('questionId') questionId: string,
+    @Body('marksAwarded') marksAwarded: number,
+  ) {
+    return this.resultsService.gradeResponse(sessionId, questionId, marksAwarded);
   }
 
   @Get('exam/:examId')

@@ -64,7 +64,7 @@ export default function SettingsPage() {
   const { can } = usePermissions();
   const [primaryColor, setPrimaryColor] = useState('#2563eb');
 
-  const canManageBranding = can(Permission.TENANT_READ);
+  const canManageBranding = can(Permission.TENANT_BRANDING);
 
   const { data: tenant, isLoading: tenantLoading } = useQuery({
     queryKey: ['tenant', user?.tenantId],

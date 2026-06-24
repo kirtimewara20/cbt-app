@@ -93,6 +93,14 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+export type Paginated<T> = {
+  items: T[];
+  total: number;
+  page?: number;
+  limit?: number;
+  totalPages?: number;
+};
+
 export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
   const { token, skipAuth, ...fetchOptions } = options;
   const headers: Record<string, string> = {
@@ -237,6 +245,12 @@ export const examsApi = {
     apiFetch(`/exams/${examId}/questions/${questionId}`, { method: 'DELETE', ...authHeaders(token) }),
   remove: (token: string, id: string) =>
     apiFetch(`/exams/${id}`, { method: 'DELETE', ...authHeaders(token) }),
+  updateSchedule: (token: string, id: string, body: { startTime: string; endTime: string; timezone?: string }) =>
+    apiFetch(`/exams/${id}/schedule`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      ...authHeaders(token),
+    }),
   myExams: (token: string) => apiFetch('/exams/my/available', authHeaders(token)),
 };
 
@@ -257,8 +271,8 @@ export const questionsApi = {
 };
 
 export const candidatesApi = {
-  list: (token: string, page = 1, search = '') =>
-    apiFetch(`/candidates?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}`, authHeaders(token)),
+  list: (token: string, page = 1, search = '', limit = 20) =>
+    apiFetch(`/candidates?page=${page}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ''}`, authHeaders(token)),
   create: (token: string, body: { email: string; password: string; firstName: string; lastName: string; registrationNumber?: string }) =>
     apiFetch('/candidates', { method: 'POST', body: JSON.stringify(body), ...authHeaders(token) }),
   dashboard: (token: string) => apiFetch('/candidates/me/dashboard', authHeaders(token)),
@@ -268,6 +282,13 @@ export const candidatesApi = {
     apiFetch(`/candidates/${id}/kyc/verify`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+      ...authHeaders(token),
+    }),
+  stats: (token: string) => apiFetch('/candidates/stats', authHeaders(token)),
+  submitKyc: (token: string, body: { documentType: string; idNumber: string; fileName: string; fileData: string }) =>
+    apiFetch('/candidates/me/kyc', {
+      method: 'POST',
+      body: JSON.stringify(body),
       ...authHeaders(token),
     }),
 };
@@ -292,9 +313,15 @@ export const usersApi = {
 export const resultsApi = {
   byExam: (token: string, examId: string) => apiFetch(`/results/exam/${examId}`, authHeaders(token)),
   exportCsv: async (token: string, examId: string) => {
-    const res = await fetch(`${getApiUrl()}/results/exam/${examId}/export`, {
-      headers: { Authorization: `Bearer ${token}`, 'X-Tenant-ID': getAuthTenantId() },
-    });
+    const url = `${getApiUrl()}/results/exam/${examId}/export`;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'X-Tenant-ID': getAuthTenantId(),
+    };
+    const useRetry = typeof window !== 'undefined' && !isLocalDevHost();
+    const res = useRetry
+      ? await fetchWithColdStartRetry(url, { headers })
+      : await fetch(url, { headers });
     if (!res.ok) throw new Error('Export failed');
     return res.blob();
   },
@@ -307,6 +334,16 @@ export const resultsApi = {
     apiFetch(`/results/rank/${examId}`, { method: 'POST', ...authHeaders(token) }),
   publish: (token: string, examId: string) =>
     apiFetch(`/results/publish/${examId}`, { method: 'POST', ...authHeaders(token) }),
+  subjective: (token: string, examId: string) =>
+    apiFetch(`/results/exam/${examId}/subjective`, authHeaders(token)),
+  grade: (token: string, sessionId: string, questionId: string, marksAwarded: number) =>
+    apiFetch(`/results/grade/${sessionId}/${questionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ marksAwarded }),
+      ...authHeaders(token),
+    }),
+  verifyCertificate: (resultId: string) =>
+    apiFetch(`/results/verify/${resultId}`, { skipAuth: true }),
 };
 
 export const examSessionApi = {
@@ -359,7 +396,8 @@ export const proctoringApi = {
 };
 
 export const auditApi = {
-  list: (token: string, page = 1) => apiFetch(`/audit/logs?page=${page}&limit=20`, authHeaders(token)),
+  list: (token: string, page = 1, limit = 20) =>
+    apiFetch(`/audit/logs?page=${page}&limit=${limit}`, authHeaders(token)),
 };
 
 export const analyticsApi = {

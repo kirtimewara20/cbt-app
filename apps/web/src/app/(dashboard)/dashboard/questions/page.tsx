@@ -21,7 +21,21 @@ import Link from 'next/link';
 import { Search, Sparkles, Plus, HelpCircle } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, DataTableHeader, DataTableHead, DataTableRow, DataTableCell, EmptyState } from '@/components/layout/data-table';
+import { PaginationControls } from '@/components/layout/pagination';
 import { TableSkeleton } from '@/components/ui/skeleton';
+
+const EMPTY_QUESTION_FORM = {
+  title: '',
+  type: 'MCQ',
+  difficulty: 'MEDIUM',
+  content: '',
+  optionA: '',
+  optionB: '',
+  optionC: '',
+  optionD: '',
+  correctAnswer: 'a',
+  correctAnswers: [] as string[],
+};
 
 export default function QuestionsPage() {
   const { accessToken } = useRequireAuth(true);
@@ -29,23 +43,27 @@ export default function QuestionsPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const debouncedSearch = useDebounce(search);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
-  const [form, setForm] = useState({
-    title: '', type: 'MCQ', difficulty: 'MEDIUM',
-    content: '', optionA: '', optionB: '', optionC: '', optionD: '',
-    correctAnswer: 'a', correctAnswers: [] as string[],
-  });
+  const [form, setForm] = useState(EMPTY_QUESTION_FORM);
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['questions', debouncedSearch],
-    queryFn: () => questionsApi.list(accessToken!, 1, { search: debouncedSearch }),
+    queryKey: ['questions', debouncedSearch, page],
+    queryFn: () => questionsApi.list(accessToken!, page, { search: debouncedSearch }),
     enabled: !!accessToken,
     placeholderData: (prev) => prev,
   });
 
   const createMutation = useMutation({
-    mutationFn: () => questionsApi.create(accessToken!, {
+    mutationFn: () => {
+      if (form.type === 'MSQ' && form.correctAnswers.length === 0) {
+        throw new Error('Select at least one correct answer for MSQ');
+      }
+      if (!form.title.trim() || !form.content.trim()) {
+        throw new Error('Title and question text are required');
+      }
+      return questionsApi.create(accessToken!, {
       title: form.title,
       type: form.type,
       difficulty: form.difficulty,
@@ -56,9 +74,11 @@ export default function QuestionsPage() {
         : { value: form.correctAnswer },
       marks: 2,
       negativeMarks: 0.5,
-    }),
+    });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
+      setForm(EMPTY_QUESTION_FORM);
       setShowCreate(false);
       toast({ title: 'Question saved', variant: 'success' });
     },
@@ -104,7 +124,7 @@ export default function QuestionsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader title="Question Bank" description="MCQ & MSQ questions with approval workflow" badge={`${items.length} total`}>
+      <PageHeader title="Question Bank" description="MCQ & MSQ questions with approval workflow" badge={data?.total != null ? `${data.total} total` : undefined}>
         <div className="relative w-56">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Search questions..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -112,10 +132,21 @@ export default function QuestionsPage() {
         <Button variant="outline" asChild>
           <Link href="/dashboard/ai"><Sparkles className="mr-2 h-4 w-4" />Generate with AI</Link>
         </Button>
-        <Button onClick={() => setShowCreate(!showCreate)}>
+        {can(Permission.QUESTION_CREATE) && (
+        <Button
+          onClick={() => {
+            if (showCreate) {
+              setShowCreate(false);
+            } else {
+              setForm(EMPTY_QUESTION_FORM);
+              setShowCreate(true);
+            }
+          }}
+        >
           <Plus className="mr-2 h-4 w-4" />
           {showCreate ? 'Cancel' : 'Add Question'}
         </Button>
+        )}
       </PageHeader>
 
       {showCreate && (
@@ -186,7 +217,7 @@ export default function QuestionsPage() {
                 <DataTableCell className="text-muted-foreground">{q.difficulty}</DataTableCell>
                 <DataTableCell><Badge variant={q.status === 'APPROVED' ? 'success' : 'warning'}>{q.status}</Badge></DataTableCell>
                 <DataTableCell>
-                  {q.status !== 'APPROVED' ? (
+                  {can(Permission.QUESTION_APPROVE) && q.status !== 'APPROVED' ? (
                     <Button size="sm" variant="outline" onClick={() => approveMutation.mutate(q.id)}>Approve</Button>
                   ) : (
                     <span className="text-sm text-muted-foreground">—</span>
@@ -212,6 +243,13 @@ export default function QuestionsPage() {
         </table>
         {!items.length && <EmptyState icon={HelpCircle} title="No questions found" description={debouncedSearch ? 'Try a different search term.' : 'Add questions manually or generate with AI.'} />}
       </DataTable>
+
+      <PaginationControls
+        page={page}
+        totalPages={data?.totalPages ?? 1}
+        total={data?.total}
+        onPageChange={setPage}
+      />
 
       {isFetching && !isLoading && (
         <p className="text-center text-xs text-muted-foreground">Updating...</p>

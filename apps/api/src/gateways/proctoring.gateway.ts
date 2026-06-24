@@ -23,12 +23,17 @@ import { AiService } from '../modules/ai/ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { WsAuthService } from '../common/utils/ws-auth.service';
-import { getPrimaryCorsOrigin } from '../common/utils/cors-origins';
+import { isOriginAllowed } from '../common/utils/cors-origins';
 import { Permission } from '@cbt/shared';
 
 @WebSocketGateway({
   namespace: '/proctoring',
-  cors: { origin: getPrimaryCorsOrigin(), credentials: true },
+  cors: {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      callback(null, isOriginAllowed(origin));
+    },
+    credentials: true,
+  },
 })
 
 export class ProctoringGateway implements OnGatewayConnection {

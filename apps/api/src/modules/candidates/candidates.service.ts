@@ -38,6 +38,58 @@ export class CandidatesService {  constructor(private prisma: PrismaService) {}
     return { items, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
   }
 
+  async getKycStats(tenantId: string) {
+    const [total, verified, pending, rejected] = await Promise.all([
+      this.prisma.candidate.count({ where: { tenantId } }),
+      this.prisma.candidate.count({ where: { tenantId, kycStatus: 'VERIFIED' } }),
+      this.prisma.candidate.count({ where: { tenantId, kycStatus: 'PENDING' } }),
+      this.prisma.candidate.count({ where: { tenantId, kycStatus: 'REJECTED' } }),
+    ]);
+    return { total, verified, pending, rejected };
+  }
+
+  async submitKyc(
+    userId: string,
+    data: { documentType: string; idNumber: string; fileName: string; fileData: string },
+  ) {
+    const candidate = await this.prisma.candidate.findUnique({ where: { userId } });
+    if (!candidate) throw new NotFoundException('Candidate profile not found');
+    if (!data.fileName?.trim() || !data.fileData?.trim()) {
+      throw new BadRequestException('Document file is required');
+    }
+    if (data.fileData.length > 4_000_000) {
+      throw new BadRequestException('Document is too large (max ~3MB)');
+    }
+
+    await this.prisma.candidateDocument.deleteMany({
+      where: { candidateId: candidate.id, type: data.documentType },
+    });
+
+    await this.prisma.candidateDocument.create({
+      data: {
+        candidateId: candidate.id,
+        type: data.documentType,
+        fileName: data.fileName,
+        fileUrl: data.fileData,
+        fileSize: data.fileData.length,
+        mimeType: data.fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+      },
+    });
+
+    return this.prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        kycStatus: 'PENDING',
+        profileData: {
+          ...(candidate.profileData as object),
+          idNumber: data.idNumber,
+          documentType: data.documentType,
+          submittedAt: new Date().toISOString(),
+        },
+      },
+    });
+  }
+
   async findOne(id: string, tenantId: string) {
     const candidate = await this.prisma.candidate.findFirst({
       where: { id, tenantId },

@@ -110,3 +110,23 @@ export function formatExamTimeRange(
     return `${new Date(startIso).toLocaleString()} – ${new Date(endIso).toLocaleString()}`;
   }
 }
+
+/** Convert UTC ISO to `datetime-local` input value in the exam timezone. */
+export function utcIsoToLocalDateTimeInput(iso: string, timezone = DEFAULT_EXAM_TIMEZONE): string {
+  try {
+    const date = new Date(iso);
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+  } catch {
+    return '';
+  }
+}

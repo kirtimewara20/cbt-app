@@ -140,10 +140,32 @@ export function QuestionInput({ question, answer, onSave }: QuestionInputProps) 
   }
 
   if (type === 'AUDIO' || type === 'VIDEO') {
+    const content = question.content as { text?: string; mediaUrl?: string } | undefined;
+    const mediaUrl = content?.mediaUrl;
+    const acknowledged = answer === 'acknowledged';
+
     return (
-      <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-        {type} response questions are not supported in this browser session.
-        Please contact your exam administrator.
+      <div className="space-y-4">
+        {content?.text && <p className="text-sm">{content.text}</p>}
+        {mediaUrl ? (
+          type === 'AUDIO' ? (
+            <audio controls className="w-full" src={mediaUrl} />
+          ) : (
+            <video controls className="w-full max-h-80 rounded-lg" src={mediaUrl} />
+          )
+        ) : (
+          <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+            No media attached to this question. Listen/read the instructions above and confirm when ready.
+          </p>
+        )}
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => onSave(e.target.checked ? 'acknowledged' : '')}
+          />
+          I have {type === 'AUDIO' ? 'listened to' : 'watched'} the content and am ready to proceed
+        </label>
       </div>
     );
   }

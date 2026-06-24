@@ -3,9 +3,19 @@ import { useAuthStore } from '@/stores/auth-store';
 
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app')) {
-    return 'wss://cbt-api-ktkr.onrender.com';
+
+  if (typeof window !== 'undefined') {
+    const { hostname, protocol } = window.location;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:4000';
+    }
+    if (hostname.endsWith('.vercel.app')) {
+      return 'wss://cbt-api-ktkr.onrender.com';
+    }
+    const wsProto = protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProto}//${hostname}`;
   }
+
   return 'http://localhost:4000';
 }
 
@@ -21,8 +31,15 @@ function socketAuth() {
   };
 }
 
+function applySocketAuth(socket: Socket) {
+  socket.auth = socketAuth();
+}
+
 export function getProctoringSocket(): Socket {
-  if (proctoringSocket) return proctoringSocket;
+  if (proctoringSocket) {
+    applySocketAuth(proctoringSocket);
+    return proctoringSocket;
+  }
 
   proctoringSocket = io(`${getWsUrl()}/proctoring`, {
     auth: socketAuth(),
@@ -32,11 +49,16 @@ export function getProctoringSocket(): Socket {
     reconnectionAttempts: 10,
   });
 
+  proctoringSocket.on('connect_error', () => applySocketAuth(proctoringSocket!));
+
   return proctoringSocket;
 }
 
 export function getExamSocket(): Socket {
-  if (examSocket) return examSocket;
+  if (examSocket) {
+    applySocketAuth(examSocket);
+    return examSocket;
+  }
 
   examSocket = io(`${getWsUrl()}/exam`, {
     auth: socketAuth(),
@@ -45,6 +67,8 @@ export function getExamSocket(): Socket {
     reconnection: true,
     reconnectionAttempts: 10,
   });
+
+  examSocket.on('connect_error', () => applySocketAuth(examSocket!));
 
   return examSocket;
 }

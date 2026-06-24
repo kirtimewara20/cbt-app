@@ -16,6 +16,7 @@ import { Permission } from '@cbt/shared';
 import { toast } from '@/hooks/use-toast';
 import { useDebounce } from '@/hooks/use-debounce';
 import { Search, Users, CheckCircle2, Clock, UserCheck } from 'lucide-react';
+import { PaginationControls } from '@/components/layout/pagination';
 import { TableSkeleton } from '@/components/ui/skeleton';
 
 type CandidateItem = {
@@ -38,13 +39,20 @@ export default function CandidatesPage() {
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const debouncedSearch = useDebounce(search);
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['candidates', debouncedSearch],
-    queryFn: () => candidatesApi.list(accessToken!, 1, debouncedSearch),
+    queryKey: ['candidates', debouncedSearch, page],
+    queryFn: () => candidatesApi.list(accessToken!, page, debouncedSearch),
     enabled: !!accessToken,
     placeholderData: (prev) => prev,
+  });
+
+  const { data: kycStats } = useQuery({
+    queryKey: ['candidates-stats'],
+    queryFn: () => candidatesApi.stats(accessToken!) as Promise<{ total: number; verified: number; pending: number }>,
+    enabled: !!accessToken,
   });
 
   const kycMutation = useMutation({
@@ -63,8 +71,7 @@ export default function CandidatesPage() {
   if (isLoading) return <TableSkeleton rows={6} cols={6} />;
 
   const items = (data?.items || []) as CandidateItem[];
-  const verified = items.filter((c) => c.kycStatus === 'VERIFIED').length;
-  const pending = items.filter((c) => c.kycStatus === 'PENDING').length;
+  const totalPages = data?.totalPages ?? 1;
 
   return (
     <div className="space-y-8">
@@ -86,9 +93,15 @@ export default function CandidatesPage() {
       </PageHeader>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard title="Total Candidates" value={data?.total ?? items.length} icon={Users} accent="blue" />
-        <StatCard title="KYC Verified" value={verified} icon={CheckCircle2} accent="green" />
-        <StatCard title="Pending Review" value={pending} icon={Clock} accent="amber" trend={pending ? 'Action needed' : undefined} />
+        <StatCard title="Total Candidates" value={kycStats?.total ?? data?.total ?? 0} icon={Users} accent="blue" />
+        <StatCard title="KYC Verified" value={kycStats?.verified ?? 0} icon={CheckCircle2} accent="green" />
+        <StatCard
+          title="Pending Review"
+          value={kycStats?.pending ?? 0}
+          icon={Clock}
+          accent="amber"
+          trend={(kycStats?.pending ?? 0) > 0 ? 'Action needed' : undefined}
+        />
       </div>
 
       <DataTable>
@@ -168,6 +181,13 @@ export default function CandidatesPage() {
           />
         )}
       </DataTable>
+
+      <PaginationControls
+        page={page}
+        totalPages={totalPages}
+        total={data?.total}
+        onPageChange={(p) => setPage(p)}
+      />
 
       {isFetching && !isLoading && (
         <p className="text-center text-xs text-muted-foreground">Updating...</p>

@@ -106,6 +106,28 @@ export class ExamsService {
     });
   }
 
+  async updateSchedule(
+    id: string,
+    tenantId: string,
+    data: { startTime: string; endTime: string; timezone?: string },
+  ) {
+    const exam = await this.prisma.exam.findFirst({ where: { id, tenantId } });
+    if (!exam) throw new NotFoundException('Exam not found');
+    if (exam.status === 'COMPLETED') {
+      throw new BadRequestException('Cannot edit schedule of a completed exam');
+    }
+
+    const timezone = data.timezone || exam.timezone || DEFAULT_EXAM_TIMEZONE;
+    return this.prisma.exam.update({
+      where: { id },
+      data: {
+        startTime: parseExamDateTime(data.startTime, timezone),
+        endTime: parseExamDateTime(data.endTime, timezone),
+        timezone,
+      },
+    });
+  }
+
   async assignCandidates(examId: string, tenantId: string, candidateIds: string[]) {
     const exam = await this.prisma.exam.findFirst({ where: { id: examId, tenantId } });
     if (!exam) throw new NotFoundException('Exam not found');

@@ -35,6 +35,22 @@ export class CandidatesController {
     return this.candidatesService.create(tenantId, body);
   }
 
+  @Get('stats')
+  @RequirePermissions(Permission.CANDIDATE_READ)
+  getStats(@CurrentUser('tenantId') tenantId: string) {
+    return this.candidatesService.getKycStats(tenantId);
+  }
+
+  @Post('me/kyc')
+  @RequirePermissions(Permission.CANDIDATE_UPDATE)
+  @ApiOperation({ summary: 'Submit KYC documents' })
+  submitKyc(
+    @CurrentUser('sub') userId: string,
+    @Body() body: { documentType: string; idNumber: string; fileName: string; fileData: string },
+  ) {
+    return this.candidatesService.submitKyc(userId, body);
+  }
+
   @Get('me/dashboard')
   @RequirePermissions(Permission.CANDIDATE_READ)
   getDashboard(@CurrentUser('sub') userId: string) {
