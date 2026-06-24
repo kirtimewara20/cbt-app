@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { examsApi, resultsApi } from '@/lib/api';
+import { examsApi, resultsApi, type SubjectiveResponseItem } from '@/lib/api';
 import { useRequireAuth } from '@/hooks/use-auth';
 import { usePermissions } from '@/hooks/use-permissions';
 import { Permission } from '@cbt/shared';
@@ -18,23 +18,13 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 
-type SubjectiveItem = {
-  id: string;
-  sessionId: string;
-  questionId: string;
-  answer: unknown;
-  marksAwarded: number | null;
-  question: { title: string; type: string; versions: { marks: number }[] };
-  session: { candidate: { user: { firstName: string; lastName: string; email: string } } };
-};
-
 export default function ResultsPage() {
   const { accessToken } = useRequireAuth(true);
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const [selectedExam, setSelectedExam] = useState('');
   const [showGrading, setShowGrading] = useState(false);
-  const [gradeTarget, setGradeTarget] = useState<SubjectiveItem | null>(null);
+  const [gradeTarget, setGradeTarget] = useState<SubjectiveResponseItem | null>(null);
   const [gradeMarks, setGradeMarks] = useState('');
 
   const { data: exams } = useQuery({
@@ -51,11 +41,11 @@ export default function ResultsPage() {
 
   const { data: subjective } = useQuery({
     queryKey: ['subjective', selectedExam],
-    queryFn: () => resultsApi.subjective(accessToken!, selectedExam) as Promise<SubjectiveItem[]>,
+    queryFn: () => resultsApi.subjective(accessToken!, selectedExam),
     enabled: !!accessToken && !!selectedExam && showGrading,
   });
 
-  const unpublishedCount = (results?.items || []).filter((r: { published: boolean }) => !r.published).length;
+  const unpublishedCount = (results?.items ?? []).filter((r) => !r.published).length;
   const pendingGrading = (subjective || []).filter((r) => r.marksAwarded == null).length;
 
   const rankMutation = useMutation({
@@ -114,7 +104,7 @@ export default function ResultsPage() {
       <PageHeader title="Results" description="View, rank, and publish examination results">
         <select className="h-10 rounded-lg border border-input bg-background px-3 text-sm shadow-sm" value={selectedExam} onChange={(e) => { setSelectedExam(e.target.value); setShowGrading(false); }}>
           <option value="">Select exam...</option>
-          {(exams?.items || []).map((e: { id: string; title: string; code: string }) => (
+          {(exams?.items ?? []).map((e) => (
             <option key={e.id} value={e.id}>{e.code} — {e.title}</option>
           ))}
         </select>
@@ -202,7 +192,7 @@ export default function ResultsPage() {
               <DataTableHead>Status</DataTableHead>
             </DataTableHeader>
             <tbody>
-              {(results?.items || []).map((r: { id: string; rank?: number; totalScore: number; maxScore: number; percentage: number; published: boolean; candidate: { user: { firstName: string; lastName: string } } }) => (
+              {(results?.items ?? []).map((r) => (
                 <DataTableRow key={r.id}>
                   <DataTableCell className="font-bold text-primary">{r.rank ?? '—'}</DataTableCell>
                   <DataTableCell className="font-medium">{r.candidate.user.firstName} {r.candidate.user.lastName}</DataTableCell>

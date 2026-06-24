@@ -101,6 +101,33 @@ export type Paginated<T> = {
   totalPages?: number;
 };
 
+export type ExamListItem = {
+  id: string;
+  title: string;
+  code: string;
+  status: string;
+};
+
+export type ExamResultListItem = {
+  id: string;
+  rank?: number | null;
+  totalScore: number;
+  maxScore: number;
+  percentage: number;
+  published: boolean;
+  candidate: { user: { firstName: string; lastName: string } };
+};
+
+export type SubjectiveResponseItem = {
+  id: string;
+  sessionId: string;
+  questionId: string;
+  answer: unknown;
+  marksAwarded: number | null;
+  question: { title: string; type: string; versions: { marks: number }[] };
+  session: { candidate: { user: { firstName: string; lastName: string; email: string } } };
+};
+
 export async function apiFetch<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
   const { token, skipAuth, ...fetchOptions } = options;
   const headers: Record<string, string> = {
@@ -222,7 +249,10 @@ export const dashboardApi = {
 
 export const examsApi = {
   list: (token: string, page = 1, search = '') =>
-    apiFetch(`/exams?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}`, authHeaders(token)),
+    apiFetch<Paginated<ExamListItem>>(
+      `/exams?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}`,
+      authHeaders(token),
+    ),
   get: (token: string, id: string) => apiFetch(`/exams/${id}`, authHeaders(token)),
   instructions: (token: string, id: string) => apiFetch(`/exams/${id}/instructions`, authHeaders(token)),
   create: (token: string, body: unknown) =>
@@ -311,7 +341,8 @@ export const usersApi = {
 };
 
 export const resultsApi = {
-  byExam: (token: string, examId: string) => apiFetch(`/results/exam/${examId}`, authHeaders(token)),
+  byExam: (token: string, examId: string) =>
+    apiFetch<Paginated<ExamResultListItem>>(`/results/exam/${examId}`, authHeaders(token)),
   exportCsv: async (token: string, examId: string) => {
     const url = `${getApiUrl()}/results/exam/${examId}/export`;
     const headers = {
@@ -335,7 +366,7 @@ export const resultsApi = {
   publish: (token: string, examId: string) =>
     apiFetch(`/results/publish/${examId}`, { method: 'POST', ...authHeaders(token) }),
   subjective: (token: string, examId: string) =>
-    apiFetch(`/results/exam/${examId}/subjective`, authHeaders(token)),
+    apiFetch<SubjectiveResponseItem[]>(`/results/exam/${examId}/subjective`, authHeaders(token)),
   grade: (token: string, sessionId: string, questionId: string, marksAwarded: number) =>
     apiFetch(`/results/grade/${sessionId}/${questionId}`, {
       method: 'PATCH',

@@ -69,7 +69,7 @@ export default function MonitoringPage() {
 
   const { data: exams } = useQuery({
     queryKey: ['exams'],
-    queryFn: () => examsApi.list(accessToken!) as Promise<{ items: { id: string; title: string; status: string }[] }>,
+    queryFn: () => examsApi.list(accessToken!),
     enabled: !!accessToken,
   });
 
@@ -115,7 +115,7 @@ type LiveMonitoringData = {
       <PageHeader title="Live Proctoring" description="Real-time candidate monitoring with AI risk detection and proctor controls" badge="Live">
         <select className="form-select w-56" value={examId} onChange={(e) => setExamId(e.target.value)}>
           <option value="">Select exam...</option>
-          {(exams?.items || []).filter((e: { status: string }) => e.status === 'PUBLISHED').map((e: { id: string; title: string }) => (
+          {(exams?.items ?? []).filter((e) => e.status === 'PUBLISHED').map((e) => (
             <option key={e.id} value={e.id}>{e.title}</option>
           ))}
         </select>

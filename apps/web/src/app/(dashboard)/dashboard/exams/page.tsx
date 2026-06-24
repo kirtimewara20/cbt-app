@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { DEFAULT_EXAM_TIMEZONE, localDateTimeToUtcIso } from '@cbt/shared';
 import { EXAM_TIMEZONE_OPTIONS, formatExamTimeRange, utcIsoToLocalDateTimeInput } from '@/lib/exam-dates';
-import { FileText, Plus, Users, Clock, HelpCircle } from 'lucide-react';
+import { FileText, Plus, Users, Clock, HelpCircle, X } from 'lucide-react';
 import { TableSkeleton } from '@/components/ui/skeleton';
 
 type ExamItem = {
@@ -142,9 +142,21 @@ export default function ExamsPage() {
     <div className="space-y-8">
       <PageHeader title="Exams" description="Create, publish, and manage your examination lifecycle" badge="Core">
         {can(Permission.EXAM_CREATE) && (
-        <Button onClick={() => setShowCreate(!showCreate)}>
-          <Plus className="mr-2 h-4 w-4" />
-          {showCreate ? 'Cancel' : 'Create Exam'}
+        <Button
+          variant={showCreate ? 'outline' : 'default'}
+          onClick={() => setShowCreate(!showCreate)}
+        >
+          {showCreate ? (
+            <>
+              <X className="mr-2 h-4 w-4" />
+              Cancel
+            </>
+          ) : (
+            <>
+              <Plus className="mr-2 h-4 w-4" />
+              Create Exam
+            </>
+          )}
         </Button>
         )}
       </PageHeader>
